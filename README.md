@@ -20,7 +20,31 @@ menu-bar reader, or any other app can reuse it.
 
 No npm dependencies are required at runtime — Coda uses Node built-ins only.
 
-## Install
+## Quick start (the simple way)
+
+Three commands, then restart Cursor. On macOS this needs **no API keys and no extra installs** — your Mac already has a built-in voice.
+
+```bash
+git clone https://github.com/c-staton/coda
+cd coda
+node src/cli.mjs install
+```
+
+That's it. `install` wires Coda into Cursor for **every** project and turns it on.
+Fully quit and reopen Cursor, send any message, and when the reply finishes you'll
+hear a short spoken summary.
+
+- Mute / unmute anytime: `node src/cli.mjs off` / `node src/cli.mjs on`
+- Check state: `node src/cli.mjs status`
+- Remove it: `node src/cli.mjs uninstall`
+
+Tip: run `npm link` once to get a global `coda` command, so you can type
+`coda off` instead of `node src/cli.mjs off`.
+
+> Linux: install a voice engine first with `sudo apt-get install espeak-ng`.
+> macOS uses the built-in `say`. No engine? Coda safely prints the summary instead.
+
+## Manual install
 
 ```bash
 git clone https://github.com/c-staton/coda
@@ -32,7 +56,8 @@ npm link      # optional: puts `coda` on your PATH
 ## CLI
 
 ```
-coda on | off | toggle | status   # control the listen/mute flag
+coda install | uninstall           # wire (or remove) the Cursor hook, everywhere
+coda on | off | toggle | status    # control the listen/mute flag
 coda speak [text]                  # digest + speak some text
 coda replay                        # speak the last digest again
 coda hook                          # read afterAgentResponse JSON from stdin
@@ -42,16 +67,14 @@ State lives in `~/.coda/state.json`; config in `~/.coda/config.json`
 (engine, voice, language, speed, maxChars). Override the engine per run with
 `CODA_ENGINE=espeak coda speak "hello"`.
 
-## Wire it into Cursor
+## How it plugs into Cursor
 
 Coda speaks when Cursor finishes an assistant reply, via the
-[`afterAgentResponse` hook](https://cursor.com/docs/hooks.md).
+[`afterAgentResponse` hook](https://cursor.com/docs/hooks.md). `coda install` sets this
+up for you by merging a single entry into `~/.cursor/hooks.json` (it never touches your
+other hooks). That's the recommended path and works in every project.
 
-**As a plugin** (this repo is a Cursor plugin): import from GitHub. `hooks/hooks.json`
-calls `scripts/after-agent-response.mjs`, which pipes the reply into `coda hook`.
-
-**User-level** (works in every project without installing the plugin per repo) — add to
-`~/.cursor/hooks.json` with an absolute path:
+If you'd rather wire it by hand, add this to `~/.cursor/hooks.json` with an absolute path:
 
 ```json
 {
@@ -64,8 +87,8 @@ calls `scripts/after-agent-response.mjs`, which pipes the reply into `coda hook`
 }
 ```
 
-Then: `coda on`, send a Cursor message, hear a short wrap-up. `coda off` silences the
-next reply.
+This repo is also a Cursor **plugin** (import from GitHub): `hooks/hooks.json` calls
+`scripts/after-agent-response.mjs`, which pipes the reply into `coda hook`.
 
 ## How the digest works
 

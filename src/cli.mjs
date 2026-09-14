@@ -3,6 +3,7 @@
 import { digest } from "./digest.mjs";
 import { speak, resolveEngine } from "./tts.mjs";
 import { getState, setState, getConfig } from "./state.mjs";
+import { installHook, uninstallHook, hooksFilePath } from "./install.mjs";
 
 function readStdin() {
   return new Promise((resolve) => {
@@ -99,12 +100,57 @@ async function main() {
       if (r.audioPath) process.stdout.write(`coda: audio -> ${r.audioPath}\n`);
       return 0;
     }
+    case "install": {
+      let r;
+      try {
+        r = installHook();
+      } catch (e) {
+        process.stderr.write(`coda: ${e.message}\n`);
+        return 1;
+      }
+      setState({ listening: true });
+      const engine = resolveEngine(getConfig());
+      process.stdout.write(
+        (r.alreadyInstalled
+          ? "coda: already installed - refreshed and listening is ON.\n"
+          : "coda: installed! Coda will now speak Cursor replies.\n") +
+          `  hook file: ${r.path}\n` +
+          `  voice engine: ${engine}${
+            engine === "print" ? " (no TTS engine found - see README)" : ""
+          }\n\n` +
+          "Next: fully restart Cursor, then send any message. When the reply\n" +
+          "finishes, you'll hear a short spoken summary.\n" +
+          "Controls: `coda off` to mute, `coda on` to unmute, `coda status` to check.\n" +
+          "Remove it anytime with `coda uninstall`.\n"
+      );
+      return 0;
+    }
+    case "uninstall": {
+      let r;
+      try {
+        r = uninstallHook();
+      } catch (e) {
+        process.stderr.write(`coda: ${e.message}\n`);
+        return 1;
+      }
+      if (!r.existed || r.removed === 0) {
+        process.stdout.write(
+          `coda: nothing to remove (no Coda hook in ${hooksFilePath()}).\n`
+        );
+      } else {
+        process.stdout.write(
+          "coda: uninstalled. Restart Cursor to stop the spoken summaries.\n" +
+            `  updated: ${r.path}\n`
+        );
+      }
+      return 0;
+    }
     case "hook":
       return runHook();
     default:
       process.stderr.write(
         `coda: unknown command "${cmd}"\n` +
-          "usage: coda on|off|toggle|status|speak [text]|replay|hook\n"
+          "usage: coda install|uninstall|on|off|toggle|status|speak [text]|replay|hook\n"
       );
       return 1;
   }
