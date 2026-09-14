@@ -1,0 +1,8 @@
+{
+  "version": 1,
+  "hooks": {
+    "afterAgentResponse": [
+      { "command": "node ./scripts/after-agent-response.mjs" }
+    ]
+  }
+}

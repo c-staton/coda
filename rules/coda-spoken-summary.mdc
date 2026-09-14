@@ -1,0 +1,18 @@
+---
+description: Emit a short spoken wrap-up for Coda when a reply is long.
+alwaysApply: true
+---
+
+When your reply is long (multiple paragraphs, code, tables, or lists), end it with a
+1-2 sentence spoken wrap-up wrapped in a `<coda>...</coda>` tag so Coda can read it aloud.
+
+Rules for the `<coda>` block:
+
+- Plain prose only. No code, no links, no lists, no markdown inside the tag.
+- 1-2 sentences summarizing what you did or what the user should do next.
+- Skip the tag entirely for short, one-line replies (Coda will read those directly).
+- Never put secrets, tokens, or file contents inside the tag.
+
+Example:
+
+<coda>Added the login endpoint and wired it to the auth service. Run the tests to confirm before you deploy.</coda>
