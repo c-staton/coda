@@ -3,6 +3,7 @@ import { homedir } from "node:os";
 import { join, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
   mkdirSync,
   readFileSync,
@@ -13,6 +14,8 @@ import {
   rmSync,
 } from "node:fs";
 import { paths } from "./state.mjs";
+
+export const CODA_SIGNING_NAME = "Coda Signing";
 
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -324,6 +327,138 @@ function writeAppIcon(resourcesDir) {
   rmSync(iconset, { recursive: true, force: true });
 }
 
+function fileHash(path) {
+  if (!existsSync(path)) return "";
+  return createHash("sha256").update(readFileSync(path)).digest("hex");
+}
+
+export function appSourceStamp() {
+  return [
+    fileHash(swiftSourcePath()),
+    fileHash(infoPlistPath()),
+    fileHash(menuIconPath()),
+    fileHash(markPath()),
+  ].join(":");
+}
+
+function stampPath() {
+  return join(paths.CODA_DIR, "app-stamp");
+}
+
+function readStamp() {
+  try {
+    return readFileSync(stampPath(), "utf8").trim();
+  } catch {
+    return "";
+  }
+}
+
+function writeStamp(stamp) {
+  mkdirSync(paths.CODA_DIR, { recursive: true });
+  writeFileSync(stampPath(), stamp + "\n", "utf8");
+}
+
+export function signingIdentityAvailable(listText) {
+  return Boolean(pickSigningIdentity(listText));
+}
+
+export function pickSigningIdentity(listText) {
+  const names = [...String(listText || "").matchAll(/"([^"]+)"/g)].map((m) => m[1]);
+  return (
+    names.find((n) => n === CODA_SIGNING_NAME) ||
+    names.find((n) => n.startsWith("Developer ID Application:")) ||
+    names.find((n) => n.startsWith("Apple Development:")) ||
+    ""
+  );
+}
+
+function codesignIdentities() {
+  return runCapture("security", ["find-identity", "-v", "-p", "codesigning"]);
+}
+
+function loginKeychain() {
+  const modern = join(homedir(), "Library", "Keychains", "login.keychain-db");
+  if (existsSync(modern)) return modern;
+  return join(homedir(), "Library", "Keychains", "login.keychain");
+}
+
+function createSigningIdentity() {
+  const openssl = which("openssl");
+  if (!openssl) return false;
+  const dir = join(paths.CODA_DIR, "build", "signing");
+  mkdirSync(dir, { recursive: true });
+  const cfg = join(dir, "cert.cnf");
+  const key = join(dir, "key.pem");
+  const cert = join(dir, "cert.pem");
+  const p12 = join(paths.CODA_DIR, "signing.p12");
+  writeFileSync(
+    cfg,
+    [
+      "[req]",
+      "distinguished_name = dn",
+      "x509_extensions = ext",
+      "prompt = no",
+      "[dn]",
+      `CN = ${CODA_SIGNING_NAME}`,
+      "[ext]",
+      "basicConstraints = CA:FALSE",
+      "keyUsage = digitalSignature",
+      "extendedKeyUsage = codeSigning",
+      "",
+    ].join("\n"),
+    "utf8"
+  );
+  const made = spawnSync(
+    openssl,
+    ["req", "-new", "-newkey", "rsa:2048", "-x509", "-days", "3650", "-nodes", "-config", cfg, "-keyout", key, "-out", cert],
+    { encoding: "utf8" }
+  );
+  if (made.status !== 0) return false;
+  const packed = spawnSync(
+    openssl,
+    ["pkcs12", "-export", "-inkey", key, "-in", cert, "-out", p12, "-passout", "pass:coda-local"],
+    { encoding: "utf8" }
+  );
+  if (packed.status !== 0) return false;
+  chmodSync(p12, 0o600);
+  const imported = spawnSync(
+    "security",
+    ["import", p12, "-k", loginKeychain(), "-P", "coda-local", "-A", "-T", "/usr/bin/codesign", "-T", "/usr/bin/security"],
+    { encoding: "utf8" }
+  );
+  if (imported.status !== 0) return false;
+  spawnSync(
+    "security",
+    ["set-key-partition-list", "-S", "apple-tool:,apple:,codesign:", "-s", "-k", "", loginKeychain()],
+    { stdio: "ignore" }
+  );
+  return true;
+}
+
+export function ensureSigningIdentity() {
+  if (process.platform !== "darwin") return "";
+  const existing = pickSigningIdentity(codesignIdentities());
+  if (existing) return existing;
+  if (!createSigningIdentity()) return pickSigningIdentity(codesignIdentities());
+  return pickSigningIdentity(codesignIdentities());
+}
+
+function appHasStableSignature(app) {
+  const r = spawnSync("codesign", ["-dv", "--verbose=2", app], { encoding: "utf8" });
+  const text = `${r.stdout || ""}\n${r.stderr || ""}`;
+  if (/Signature=adhoc/i.test(text)) return false;
+  return /Authority=/.test(text);
+}
+
+function signCodaApp(app) {
+  const identity = ensureSigningIdentity() || "-";
+  spawnSync("xattr", ["-cr", app], { stdio: "ignore" });
+  spawnSync("codesign", ["--force", "--deep", "--sign", identity, "--timestamp=none", app], {
+    stdio: "ignore",
+  });
+  return identity;
+}
+
 function stopCodaProcesses() {
   for (const bin of [codaBarBinPath(), legacyCodaBarBinPath()]) {
     spawnSync("pkill", ["-f", bin], { stdio: "ignore" });
@@ -373,6 +508,10 @@ export function installMacApp() {
   const overlayPath = stale ? writeSwiftBridgingOverlay(stale, buildDir) : "";
   const app = codaAppPath();
   const already = existsSync(app);
+  const stamp = appSourceStamp();
+  if (already && readStamp() === stamp && appHasStableSignature(app)) {
+    return { ok: true, app, bin: codaBarBinPath(), already, reused: true };
+  }
   const stage = join(buildDir, "Coda");
   const r = spawnSync(swiftc, swiftcBuildArgs({ src, out: stage, sdkPath, triple, overlayPath }), {
     encoding: "utf8",
@@ -385,11 +524,10 @@ export function installMacApp() {
     };
   }
   stopCodaProcesses();
-  if (existsSync(app)) rmSync(app, { recursive: true, force: true });
   mkdirSync(dirname(app), { recursive: true });
   const written = writeCodaAppBundle({ dest: app, executable: stage });
-  spawnSync("xattr", ["-cr", app], { stdio: "ignore" });
-  spawnSync("codesign", ["--force", "--deep", "--sign", "-", app], { stdio: "ignore" });
+  signCodaApp(app);
+  writeStamp(stamp);
   const legacy = legacyCodaBarBinPath();
   if (existsSync(legacy)) {
     removeLoginItem(legacy);

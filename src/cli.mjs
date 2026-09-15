@@ -254,7 +254,7 @@ async function main() {
           `  app: ${r.app.app}\n\n` +
             "Highlight text in any app, then press Control-Option-X.\n" +
             "When macOS asks, turn on Coda under Privacy & Security → Accessibility.\n" +
-            "It should say Coda. Leave Node and Terminal off. If it was already on, remove it, add Coda.app again, then quit Coda and open it.\n" +
+            "It should say Coda. Leave Node and Terminal off. Later installs keep that permission.\n" +
             "Open Coda from the menu and paste your OpenRouter key for a better voice.\n" +
             "Remove it anytime with coda uninstall.\n"
         );

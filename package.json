@@ -1,6 +1,6 @@
 {
   "name": "coda",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Highlight text on your Mac and hear it read aloud.",
   "type": "module",
   "bin": {

@@ -10,6 +10,10 @@ import {
   duplicateSwiftBridgingMap,
   writeSwiftBridgingOverlay,
   swiftcBuildArgs,
+  signingIdentityAvailable,
+  pickSigningIdentity,
+  appSourceStamp,
+  CODA_SIGNING_NAME,
 } from "../src/install.mjs";
 
 test("maps Node and uname arches to the Mac CPU swiftc should target", () => {
@@ -93,4 +97,20 @@ test("swiftc args pin SDK, CPU target, and the CLT overlay", () => {
       triple: "arm64-apple-macosx14.5",
     }).includes("arm64-apple-macosx14.5")
   );
+});
+
+test("signing identity list prefers a stable cert", () => {
+  assert.equal(pickSigningIdentity(`1) ABC "${CODA_SIGNING_NAME}"`), CODA_SIGNING_NAME);
+  assert.equal(
+    pickSigningIdentity('1) ABC "Apple Development: Chris (TEAM)"'),
+    "Apple Development: Chris (TEAM)"
+  );
+  assert.equal(signingIdentityAvailable("1) ABC \"Something Else\""), false);
+});
+
+test("app source stamp is stable for the same files", () => {
+  const a = appSourceStamp();
+  const b = appSourceStamp();
+  assert.ok(a.includes(":"));
+  assert.equal(a, b);
 });

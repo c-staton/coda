@@ -14,7 +14,7 @@ It does not run on Windows or Linux.
 - [Node 18+](https://nodejs.org/)
 - Apple’s command line tools (`xcode-select --install`)
 
-That’s it. When macOS asks, turn on **Coda** under System Settings → Privacy & Security → Accessibility. It should say Coda. Leave Node and Terminal off. If Coda was already on, remove it with the minus button, add Coda.app again, then quit Coda and open it.
+That’s it. When macOS asks, turn on **Coda** under System Settings → Privacy & Security → Accessibility. It should say Coda. Leave Node and Terminal off. Later `./install` keeps that permission.
 
 ## Install
 
