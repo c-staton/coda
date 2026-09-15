@@ -1,12 +1,10 @@
 // Sequential block playback for the settings window.
 // Click a block to play just that one, or "from here" to keep going.
 import { speak, playbackStatus, stopCurrent, pauseCurrent, resumeCurrent } from "./tts.mjs";
-import { getState, setState, getConfig, rememberSpoken, rememberReply, paths } from "./state.mjs";
+import { getState, setState, getConfig, rememberSpoken, rememberReply } from "./state.mjs";
 import { splitBlocks } from "./digest.mjs";
 import { grabScreen } from "./grab.mjs";
 import { forSpeech } from "./secret-text.mjs";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 
 let cancelled = false;
 let running = false;
@@ -89,36 +87,37 @@ export async function playRaw(text) {
 }
 
 export function sameUtterance(a, b) {
-  const norm = (s) => String(s || "").replace(/\s+/g, " ").trim();
+  const norm = (s) => forSpeech(String(s || "").replace(/\s+/g, " ").trim());
   const left = norm(a);
   const right = norm(b);
   if (!left || !right) return false;
   return left === right;
 }
 
-export function decidePlayAction({ incoming, current, playing, paused }) {
+export function decidePlayAction({ incoming, current, playing, paused, loading }) {
   if (incoming && !sameUtterance(incoming, current)) return "play";
   if (playing) return "pause";
   if (paused) return "resume";
+  if (loading) return "none";
   if (incoming) return "play";
   return "none";
 }
 
-function peekRemembered() {
-  try {
-    const rec = JSON.parse(readFileSync(join(paths.CODA_DIR, "last-highlight.json"), "utf8"));
-    if (Date.now() / 1000 - Number(rec.at || 0) > 300) return "";
-    return String(rec.text || "").trim();
-  } catch {
-    return "";
-  }
-}
-
-export async function playOrToggle() {
+export async function playOrToggle(provided) {
   const st = playbackStatus();
-  const current = String(getState().lastDigest || "").trim();
-  const grabbed = grabScreen("selection");
-  const incoming = String(grabbed.text || "").trim() || peekRemembered();
+  const s = getState();
+  const current = String(s.lastText || s.lastDigest || "").trim();
+  const grabbed =
+    provided && typeof provided === "object"
+      ? {
+          ok: Boolean(provided.text),
+          method: provided.method || "highlight",
+          text: String(provided.text || ""),
+          app: provided.app || "",
+          note: provided.note || "",
+        }
+      : grabScreen();
+  const incoming = forSpeech(String(grabbed.text || "").trim());
   const action = decidePlayAction({ incoming, current, ...st });
   if (action === "play") return { ...grabbed, ...(await playRaw(incoming)), action };
   if (action === "pause") return { ok: true, action, ...pauseCurrent() };

@@ -35,4 +35,5 @@ test("decidePlayAction pauses the same clip and replaces a new one", () => {
   assert.equal(decidePlayAction({ incoming: "Hi", current: "Hi", playing: false, paused: true }), "resume");
   assert.equal(decidePlayAction({ incoming: "New", current: "Hi", playing: true, paused: false }), "play");
   assert.equal(decidePlayAction({ incoming: "New", current: "Hi", playing: false, paused: true }), "play");
+  assert.equal(decidePlayAction({ incoming: "Hi", current: "Hi", playing: false, paused: false, loading: true }), "none");
 });

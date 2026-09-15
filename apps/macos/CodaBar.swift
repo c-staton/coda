@@ -195,6 +195,17 @@ let lastHighlightPath = codaHome + "/last-highlight.json"
 let lastGrabPath = codaHome + "/last-grab.json"
 let playbackPath = codaHome + "/playback.json"
 let playerCmdPath = codaHome + "/player-cmd.json"
+let grabCmdPath = codaHome + "/grab-cmd.json"
+let hotkeyPressPath = codaHome + "/hotkey-press.json"
+
+struct GrabCmd: Codable {
+  var id: Double
+}
+
+struct HotkeyPress: Codable {
+  var at: Double
+  var trusted: Bool
+}
 
 struct PlayerCmd: Codable {
   var action: String
@@ -609,6 +620,8 @@ final class App: NSObject, NSApplicationDelegate {
   var lastHotkeySig = ""
   var lastVoice = ""
   var lastPlayerCmdId: Double = 0
+  var lastGrabCmdId: Double = 0
+  var lastAccessNudge: TimeInterval = 0
   var busy = false
   var busyTimer: Timer?
   let sound = Sound()
@@ -619,7 +632,7 @@ final class App: NSObject, NSApplicationDelegate {
   func applicationDidFinishLaunching(_ notification: Notification) {
     NSApp.setActivationPolicy(.accessory)
     requestAccessibility()
-    writeJson(["trusted": AXIsProcessTrusted()] as [String: Bool], to: codaHome + "/ax.json")
+    refreshTrust()
     watchApps()
     watchSelections()
     if let front = NSWorkspace.shared.frontmostApplication { saveLastApp(front) }
@@ -628,6 +641,7 @@ final class App: NSObject, NSApplicationDelegate {
       cli = found.cli
     }
     adoptExistingPlayerCmd()
+    adoptExistingGrabCmd()
     writePlayback(playing: false, paused: false)
     item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
     item.button?.image = codaMenuImage()
@@ -635,6 +649,7 @@ final class App: NSObject, NSApplicationDelegate {
     item.button?.title = ""
     item.button?.toolTip = "Coda"
     item.button?.setAccessibilityTitle("Coda")
+    refreshTrust()
     rebuildMenu()
     ensureUi()
     registerHotkeys()
@@ -643,6 +658,43 @@ final class App: NSObject, NSApplicationDelegate {
   func requestAccessibility() {
     let key = kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String
     _ = AXIsProcessTrustedWithOptions([key: true] as CFDictionary)
+  }
+
+  func refreshTrust() {
+    let trusted = AXIsProcessTrusted()
+    writeJson(["trusted": trusted] as [String: Bool], to: codaHome + "/ax.json")
+    item?.button?.toolTip = trusted ? "Coda" : "Coda needs Accessibility"
+  }
+
+  func openAccessibilitySettings() {
+    let candidates = [
+      "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_Accessibility",
+      "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility",
+    ]
+    for raw in candidates {
+      if let url = URL(string: raw) {
+        NSWorkspace.shared.open(url)
+        return
+      }
+    }
+  }
+
+  func nudgeAccess() {
+    let now = Date().timeIntervalSince1970
+    if now - lastAccessNudge < 8 { return }
+    lastAccessNudge = now
+    requestAccessibility()
+    openAccessibilitySettings()
+    notify("Coda", "Remove Coda in Accessibility, add Coda.app again, turn it on, then quit Coda and open it.")
+  }
+
+  func pulseIcon() {
+    guard let button = item?.button else { return }
+    button.alphaValue = 0.2
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) { [weak self] in
+      if self?.busy == true { return }
+      self?.item.button?.animator().alphaValue = 1
+    }
   }
 
   func adoptExistingPlayerCmd() {
@@ -657,6 +709,20 @@ final class App: NSObject, NSApplicationDelegate {
           cmd.id != lastPlayerCmdId else { return }
     lastPlayerCmdId = cmd.id
     handlePlayer(["action": cmd.action, "file": cmd.file])
+  }
+
+  func adoptExistingGrabCmd() {
+    guard let data = try? Data(contentsOf: URL(fileURLWithPath: grabCmdPath)),
+          let cmd = try? JSONDecoder().decode(GrabCmd.self, from: data) else { return }
+    lastGrabCmdId = cmd.id
+  }
+
+  func pollGrabCmd() {
+    guard let data = try? Data(contentsOf: URL(fileURLWithPath: grabCmdPath)),
+          let cmd = try? JSONDecoder().decode(GrabCmd.self, from: data),
+          cmd.id != lastGrabCmdId else { return }
+    lastGrabCmdId = cmd.id
+    _ = grabHighlight()
   }
 
   func startBusy() {
@@ -741,6 +807,9 @@ final class App: NSObject, NSApplicationDelegate {
     menu.addItem(NSMenuItem.separator())
     menu.addItem(withTitle: "Play / pause  (\(formatHotkey(currentHotkeys.play)))", action: #selector(playSelection), keyEquivalent: "")
     menu.addItem(withTitle: "Stop", action: #selector(stop), keyEquivalent: ".")
+    if !AXIsProcessTrusted() {
+      menu.addItem(withTitle: "Turn on Accessibility…", action: #selector(showAccess), keyEquivalent: "")
+    }
     menu.addItem(NSMenuItem.separator())
     let voiceMenu = NSMenu()
     for voice in voices {
@@ -754,7 +823,7 @@ final class App: NSObject, NSApplicationDelegate {
     voiceParent.submenu = voiceMenu
     menu.addItem(voiceParent)
     menu.addItem(NSMenuItem.separator())
-    menu.addItem(withTitle: "Quit Coda menu", action: #selector(quit), keyEquivalent: "q")
+    menu.addItem(withTitle: "Quit Coda", action: #selector(quit), keyEquivalent: "q")
     item.menu = menu
   }
 
@@ -799,19 +868,29 @@ final class App: NSObject, NSApplicationDelegate {
     let now = Date().timeIntervalSince1970
     if now - lastSpeakAt < 0.5 { return }
     lastSpeakAt = now
-    startBusy()
+    pulseIcon()
+    writeJson(HotkeyPress(at: now, trusted: AXIsProcessTrusted()), to: hotkeyPressPath)
+    refreshTrust()
+    if !AXIsProcessTrusted() {
+      nudgeAccess()
+      return
+    }
+    let grab = grabHighlight()
+    guard grab.ok,
+          let data = try? JSONEncoder().encode(grab),
+          let raw = String(data: data, encoding: .utf8) else {
+      notify("Coda", grab.note)
+      return
+    }
     DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-      self?.runCoda(["grab"], wait: true)
-      DispatchQueue.main.async {
-        guard let self, self.busy, self.sound.player?.isPlaying != true else { return }
-        self.stopBusy()
-      }
+      self?.runCoda(["play-selection"], stdin: raw, wait: true)
     }
   }
 
   func registerHotkeys() {
     var spec = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
     InstallEventHandler(GetApplicationEventTarget(), codaHotKeyCallback, 1, &spec, nil, nil)
+    InstallEventHandler(GetEventDispatcherTarget(), codaHotKeyCallback, 1, &spec, nil, nil)
     applyHotkeys(loadHotkeys())
     hotkeyMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
       self?.handleHotkey(event)
@@ -822,9 +901,11 @@ final class App: NSObject, NSApplicationDelegate {
     }
     configTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
       self?.reloadHotkeysIfNeeded()
+      self?.refreshTrust()
     }
     Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in
       self?.pollPlayerCmd()
+      self?.pollGrabCmd()
     }
   }
 
@@ -891,6 +972,7 @@ final class App: NSObject, NSApplicationDelegate {
     ensureUi()
     NSWorkspace.shared.open(settingsURL)
   }
+  @objc func showAccess() { nudgeAccess() }
   @objc func playSelection() { speakHighlight() }
   @objc func stop() { runCoda(["stop"]) }
   @objc func pickVoice(_ sender: NSMenuItem) {

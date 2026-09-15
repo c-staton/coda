@@ -175,6 +175,7 @@ function stopCodaProcesses() {
   for (const bin of [codaBarBinPath(), legacyCodaBarBinPath()]) {
     spawnSync("pkill", ["-f", bin], { stdio: "ignore" });
   }
+  spawnSync("pkill", ["-f", "cli.mjs ui"], { stdio: "ignore" });
 }
 
 export function installMacApp() {

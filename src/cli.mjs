@@ -3,7 +3,7 @@
 import { digest } from "./digest.mjs";
 import { speak, resolveEngine, pauseCurrent, resumeCurrent, stopCurrent, togglePause } from "./tts.mjs";
 import { getState, getConfig, setConfig, rememberSpoken } from "./state.mjs";
-import { cancelFollow, playRaw, playGrab } from "./player.mjs";
+import { cancelFollow, playRaw, playGrab, playOrToggle } from "./player.mjs";
 import { startUiServer } from "./ui-server.mjs";
 import { installAll, uninstallAll } from "./install.mjs";
 import { setApiKey, hasApiKey } from "./secrets.mjs";
@@ -96,9 +96,25 @@ async function main() {
       process.stdout.write(`coda: reading ${r.method ? "via " + r.method + " " : ""}${(r.text || text).slice(0, 60)}\n`);
       return 0;
     }
+    case "play-selection": {
+      const raw = rest.join(" ") || (await readStdin());
+      let provided = { text: raw };
+      try {
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === "object") provided = parsed;
+      } catch {
+        // plain text
+      }
+      const r = await playOrToggle(provided);
+      if (!r.ok) {
+        process.stderr.write(`coda: ${r.note || r.reason || "could not read"}\n`);
+        return 1;
+      }
+      process.stdout.write(`coda: ${r.action || r.method} "${(r.text || provided.text || "").slice(0, 70)}"\n`);
+      return 0;
+    }
     case "grab": {
-      const mode = rest[0] || "auto";
-      const r = await playGrab(mode);
+      const r = await playGrab();
       if (!r.ok) {
         process.stderr.write(`coda: ${r.note || r.reason || "could not grab text"}\n`);
         return 1;
@@ -238,6 +254,7 @@ async function main() {
           `  app: ${r.app.app}\n\n` +
             "Highlight text in any app, then press Control-Option-X.\n" +
             "When macOS asks, turn on Coda under Privacy & Security → Accessibility.\n" +
+            "It should say Coda. Leave Node and Terminal off. If it was already on, remove it, add Coda.app again, then quit Coda and open it.\n" +
             "Open Coda from the menu and paste your OpenRouter key for a better voice.\n" +
             "Remove it anytime with coda uninstall.\n"
         );
@@ -272,7 +289,7 @@ async function main() {
     default:
       process.stderr.write(
         `coda: unknown command "${cmd}"\n` +
-          "usage: coda install|uninstall|status|engine|voice|key|speak|pause|resume|stop|ui|replay\n"
+          "usage: coda install|uninstall|status|engine|voice|key|speak|pause|resume|stop|ui|replay|play-selection\n"
       );
       return 1;
   }

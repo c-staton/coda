@@ -114,4 +114,6 @@ export const paths = {
   STATE_PATH,
   CONFIG_PATH,
   PLAYBACK_PATH: join(CODA_DIR, "playback.json"),
+  GRAB_CMD_PATH: join(CODA_DIR, "grab-cmd.json"),
+  LAST_GRAB_PATH: join(CODA_DIR, "last-grab.json"),
 };
