@@ -126,6 +126,159 @@ function which(cmd) {
   return r.status === 0 ? (r.stdout || "").trim() : "";
 }
 
+function runCapture(cmd, args) {
+  const r = spawnSync(cmd, args, { encoding: "utf8" });
+  if (r.status !== 0) return "";
+  return (r.stdout || "").trim();
+}
+
+export function nodeArchToMacArch(arch) {
+  if (arch === "arm64") return "arm64";
+  if (arch === "x64" || arch === "x86_64") return "x86_64";
+  return "";
+}
+
+export function hostMacArch() {
+  return nodeArchToMacArch(runCapture("uname", ["-m"])) || nodeArchToMacArch(process.arch);
+}
+
+export function compareMacVersions(a, b) {
+  const ap = String(a || "0")
+    .split(".")
+    .map((n) => parseInt(n, 10) || 0);
+  const bp = String(b || "0")
+    .split(".")
+    .map((n) => parseInt(n, 10) || 0);
+  const len = Math.max(ap.length, bp.length);
+  for (let i = 0; i < len; i++) {
+    const av = ap[i] || 0;
+    const bv = bp[i] || 0;
+    if (av < bv) return -1;
+    if (av > bv) return 1;
+  }
+  return 0;
+}
+
+export function macDeploymentVersion(hostVersion, sdkVersion) {
+  if (hostVersion && sdkVersion) {
+    return compareMacVersions(hostVersion, sdkVersion) <= 0 ? hostVersion : sdkVersion;
+  }
+  return hostVersion || sdkVersion || "";
+}
+
+export function swiftTargetTriple(arch, version) {
+  return `${arch}-apple-macosx${version}`;
+}
+
+export function duplicateSwiftBridgingMap(swiftIncludeDir) {
+  if (!swiftIncludeDir) return "";
+  const oldMap = join(swiftIncludeDir, "module.modulemap");
+  const newMap = join(swiftIncludeDir, "bridging.modulemap");
+  if (!existsSync(oldMap) || !existsSync(newMap)) return "";
+  const oldTxt = readFileSync(oldMap, "utf8");
+  const newTxt = readFileSync(newMap, "utf8");
+  if (oldTxt.includes("module SwiftBridging") && newTxt.includes("module SwiftBridging")) {
+    return oldMap;
+  }
+  return "";
+}
+
+export function writeSwiftBridgingOverlay(staleMapPath, destDir) {
+  mkdirSync(destDir, { recursive: true });
+  const emptyPath = join(destDir, "empty.modulemap");
+  const overlayPath = join(destDir, "swift-bridging.vfsoverlay.json");
+  writeFileSync(emptyPath, "", "utf8");
+  writeFileSync(
+    overlayPath,
+    JSON.stringify({
+      version: 0,
+      "case-sensitive": false,
+      roots: [
+        {
+          type: "directory",
+          name: dirname(staleMapPath),
+          contents: [
+            {
+              type: "file",
+              name: "module.modulemap",
+              "external-contents": emptyPath,
+            },
+          ],
+        },
+      ],
+    }) + "\n",
+    "utf8"
+  );
+  return overlayPath;
+}
+
+export function swiftcBuildArgs({ src, out, sdkPath, triple, overlayPath }) {
+  const args = ["-O"];
+  if (sdkPath) args.push("-sdk", sdkPath);
+  if (triple) args.push("-target", triple);
+  if (overlayPath) {
+    args.push("-vfsoverlay", overlayPath, "-Xcc", "-ivfsoverlay", "-Xcc", overlayPath);
+  }
+  args.push(
+    "-o",
+    out,
+    src,
+    "-framework",
+    "AppKit",
+    "-framework",
+    "ApplicationServices",
+    "-framework",
+    "Carbon",
+    "-framework",
+    "AVFoundation"
+  );
+  return args;
+}
+
+function findSwiftc() {
+  return runCapture("xcrun", ["--sdk", "macosx", "--find", "swiftc"]) || which("swiftc");
+}
+
+function findMacSdkPath() {
+  return runCapture("xcrun", ["--sdk", "macosx", "--show-sdk-path"]);
+}
+
+function findMacSdkVersion() {
+  return runCapture("xcrun", ["--sdk", "macosx", "--show-sdk-version"]);
+}
+
+function hostMacVersion() {
+  return runCapture("sw_vers", ["-productVersion"]);
+}
+
+function swiftIncludeDir(swiftcPath) {
+  return resolve(join(dirname(swiftcPath), "..", "include", "swift"));
+}
+
+function summarizeSwiftcError(stderr) {
+  const text = (stderr || "").trim();
+  if (!text) return "could not build the menu app";
+  const errors = text.split("\n").filter((l) => l.includes("error:"));
+  const excerpt = (errors.length ? errors : text.split("\n")).slice(0, 12).join("\n");
+  if (text.includes("redefinition of module 'SwiftBridging'")) {
+    return (
+      excerpt +
+      "\n\nApple’s command line tools left two SwiftBridging files. Reinstall them:\n" +
+      "  sudo rm -rf /Library/Developer/CommandLineTools\n" +
+      "  xcode-select --install"
+    );
+  }
+  if (/this SDK is not supported by the compiler/i.test(text)) {
+    return (
+      excerpt +
+      "\n\nThe Mac SDK and Swift compiler do not match. Reinstall the command line tools:\n" +
+      "  sudo rm -rf /Library/Developer/CommandLineTools\n" +
+      "  xcode-select --install"
+    );
+  }
+  return excerpt;
+}
+
 export function writeCodaAppBundle({ dest, executable }) {
   const macos = join(dest, "Contents", "MacOS");
   const resources = join(dest, "Contents", "Resources");
@@ -189,7 +342,7 @@ export function installMacApp() {
   if (!existsSync(src)) {
     return { ok: false, reason: `missing ${src}` };
   }
-  const swiftc = which("swiftc");
+  const swiftc = findSwiftc();
   if (!swiftc) {
     return {
       ok: false,
@@ -197,32 +350,38 @@ export function installMacApp() {
         "Need Apple’s command line tools to build the menu app.\n  Run: xcode-select --install",
     };
   }
+  const arch = hostMacArch();
+  if (!arch) {
+    return {
+      ok: false,
+      reason: `This Mac’s CPU (${process.arch}) is not supported. Coda builds for Intel (x86_64) and Apple silicon (arm64).`,
+    };
+  }
+  const sdkPath = findMacSdkPath();
+  if (!sdkPath) {
+    return {
+      ok: false,
+      reason:
+        "Need Apple’s command line tools to build the menu app.\n  Run: xcode-select --install",
+    };
+  }
+  const deployment = macDeploymentVersion(hostMacVersion(), findMacSdkVersion());
+  const triple = deployment ? swiftTargetTriple(arch, deployment) : "";
+  const buildDir = join(paths.CODA_DIR, "build");
+  mkdirSync(buildDir, { recursive: true });
+  const stale = duplicateSwiftBridgingMap(swiftIncludeDir(swiftc));
+  const overlayPath = stale ? writeSwiftBridgingOverlay(stale, buildDir) : "";
   const app = codaAppPath();
   const already = existsSync(app);
-  const stage = join(paths.CODA_DIR, "build", "Coda");
-  mkdirSync(dirname(stage), { recursive: true });
-  const r = spawnSync(
-    swiftc,
-    [
-      "-O",
-      "-o",
-      stage,
-      src,
-      "-framework",
-      "AppKit",
-      "-framework",
-      "ApplicationServices",
-      "-framework",
-      "Carbon",
-      "-framework",
-      "AVFoundation",
-    ],
-    { encoding: "utf8" }
-  );
+  const stage = join(buildDir, "Coda");
+  const r = spawnSync(swiftc, swiftcBuildArgs({ src, out: stage, sdkPath, triple, overlayPath }), {
+    encoding: "utf8",
+    env: { ...process.env, SDKROOT: sdkPath },
+  });
   if (r.status !== 0) {
     return {
       ok: false,
-      reason: (r.stderr || r.stdout || "could not build the menu app").trim(),
+      reason: summarizeSwiftcError(r.stderr || r.stdout),
     };
   }
   stopCodaProcesses();

@@ -10,7 +10,7 @@ It does not run on Windows or Linux.
 
 ## What you need
 
-- A Mac
+- A Mac (Intel or Apple silicon)
 - [Node 18+](https://nodejs.org/)
 - Apple’s command line tools (`xcode-select --install`)
 
