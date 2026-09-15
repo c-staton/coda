@@ -1,6 +1,6 @@
 {
   "name": "coda",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Highlight text on your Mac and hear it read aloud.",
   "type": "module",
   "bin": {
@@ -26,6 +26,7 @@
     "install",
     "uninstall",
     "README.md",
+    "CHANGELOG.md",
     "LICENSE",
     "CONTRIBUTING.md",
     "SECURITY.md"

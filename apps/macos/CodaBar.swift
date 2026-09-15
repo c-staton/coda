@@ -419,10 +419,11 @@ func saveHighlight(_ text: String, app: String) {
   writeJson(SavedHighlight(text: trimmed, app: app, at: Date().timeIntervalSince1970), to: lastHighlightPath)
 }
 
-func loadHighlight() -> SavedHighlight? {
+func loadHighlight(forApp name: String = "") -> SavedHighlight? {
   guard let data = try? Data(contentsOf: URL(fileURLWithPath: lastHighlightPath)),
         let rec = try? JSONDecoder().decode(SavedHighlight.self, from: data) else { return nil }
-  if Date().timeIntervalSince1970 - rec.at > 300 { return nil }
+  if Date().timeIntervalSince1970 - rec.at > 2 { return nil }
+  if !name.isEmpty, rec.app != name { return nil }
   if rec.text.count < 2 || looksLikeSecret(rec.text) { return nil }
   return rec
 }
@@ -438,20 +439,51 @@ func setClipboard(_ value: String) {
   pb.setString(value, forType: .string)
 }
 
+func axAttrString(_ el: AXUIElement, _ attr: CFString) -> String? {
+  var val: CFTypeRef?
+  guard AXUIElementCopyAttributeValue(el, attr, &val) == .success else { return nil }
+  let text = (val as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+  return text.isEmpty ? nil : text
+}
+
+func axSelectedTextOn(_ el: AXUIElement) -> String? {
+  axAttrString(el, kAXSelectedTextAttribute as CFString)
+}
+
 func axSelectedText(pid: pid_t) -> String {
   let appEl = AXUIElementCreateApplication(pid)
+  if let text = axSelectedTextOn(appEl) { return text }
   var focused: CFTypeRef?
   guard AXUIElementCopyAttributeValue(appEl, kAXFocusedUIElementAttribute as CFString, &focused) == .success,
         let raw = focused else { return "" }
-  let element = unsafeBitCast(raw, to: AXUIElement.self)
-  var selected: CFTypeRef?
-  guard AXUIElementCopyAttributeValue(element, kAXSelectedTextAttribute as CFString, &selected) == .success,
-        let text = selected as? String else { return "" }
-  return text.trimmingCharacters(in: .whitespacesAndNewlines)
+  var element = unsafeBitCast(raw, to: AXUIElement.self)
+  for _ in 0..<8 {
+    if let text = axSelectedTextOn(element) { return text }
+    var parent: CFTypeRef?
+    guard AXUIElementCopyAttributeValue(element, kAXParentAttribute as CFString, &parent) == .success,
+          let pref = parent else { break }
+    element = unsafeBitCast(pref, to: AXUIElement.self)
+  }
+  return ""
+}
+
+func modifiersHeld() -> Bool {
+  let flags = CGEventSource.flagsState(.hidSystemState)
+  return flags.contains(.maskControl)
+    || flags.contains(.maskAlternate)
+    || flags.contains(.maskCommand)
+    || flags.contains(.maskShift)
+}
+
+func waitForModifiersUp() {
+  for _ in 0..<40 {
+    if !modifiersHeld() { return }
+    usleep(25_000)
+  }
 }
 
 func postCmdC(to pid: pid_t?, hid: Bool) {
-  let src = CGEventSource(stateID: .hidSystemState)
+  let src = CGEventSource(stateID: .privateState)
   let down = CGEvent(keyboardEventSource: src, virtualKey: 8, keyDown: true)
   let up = CGEvent(keyboardEventSource: src, virtualKey: 8, keyDown: false)
   down?.flags = .maskCommand
@@ -465,20 +497,28 @@ func postCmdC(to pid: pid_t?, hid: Bool) {
   }
 }
 
+func waitForClipboardChange(count: Int, previous: String) -> String? {
+  for _ in 0..<32 {
+    usleep(25_000)
+    if NSPasteboard.general.changeCount == count { continue }
+    let now = clipboardString()
+    if now != previous { setClipboard(previous) }
+    return now
+  }
+  return nil
+}
+
 func copyInApp(_ app: NSRunningApplication) -> String {
+  waitForModifiersUp()
   let board = NSPasteboard.general
   let previous = clipboardString()
   let count = board.changeCount
   postCmdC(to: nil, hid: true)
-  for _ in 0..<10 {
-    usleep(25_000)
-    if board.changeCount != count {
-      let now = clipboardString()
-      if now != previous { setClipboard(previous) }
-      return now
-    }
+  if let now = waitForClipboardChange(count: count, previous: previous), !now.isEmpty {
+    return now
   }
-  return ""
+  postCmdC(to: app.processIdentifier, hid: false)
+  return waitForClipboardChange(count: board.changeCount, previous: previous) ?? ""
 }
 
 func rememberFrontSelection() {
@@ -512,13 +552,7 @@ func codaHotKeyCallback(
 }
 
 func grabHighlight() -> Grab {
-  let cached = loadHighlight()
   guard let app = targetApp() else {
-    if let cached {
-      let grab = Grab(ok: true, method: "remembered", text: cached.text, app: cached.app, note: "remembered highlight")
-      writeJson(grab, to: lastGrabPath)
-      return grab
-    }
     let grab = Grab(ok: false, method: "selection", text: "", app: "", note: "no app in front")
     writeJson(grab, to: lastGrabPath)
     return grab
@@ -548,8 +582,8 @@ func grabHighlight() -> Grab {
     return grab
   }
 
-  if let cached {
-    let grab = Grab(ok: true, method: "remembered", text: cached.text, app: cached.app, note: "played the highlight Coda remembered")
+  if let cached = loadHighlight(forApp: name) {
+    let grab = Grab(ok: true, method: "remembered", text: cached.text, app: cached.app, note: "highlighted text")
     writeJson(grab, to: lastGrabPath)
     return grab
   }
