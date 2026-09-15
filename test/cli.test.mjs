@@ -39,7 +39,7 @@ test("off then on toggles listening flag", () => {
   assert.match(runCoda(["toggle"], { home }).stdout, /listening off/);
 });
 
-test("hook with valid JSON text speaks a digest", () => {
+test("hook never auto-speaks Cursor replies", () => {
   const home = freshHome();
   const payload = JSON.stringify({
     text: "All finished. The build is green.",
@@ -47,7 +47,7 @@ test("hook with valid JSON text speaks a digest", () => {
   });
   const r = runCoda(["hook"], { home, input: payload });
   assert.equal(r.status, 0);
-  assert.match(r.stdout, /All finished\. The build is green\./);
+  assert.equal(r.stdout.trim(), "");
 });
 
 test("hook while muted speaks nothing", () => {
@@ -74,7 +74,7 @@ test("hook with malformed JSON exits 0 without breaking", () => {
 
 test("replay speaks the last digest", () => {
   const home = freshHome();
-  runCoda(["hook"], { home, input: JSON.stringify({ text: "Remember this line." }) });
+  runCoda(["speak", "Remember this line."], { home });
   const r = runCoda(["replay"], { home });
   assert.equal(r.status, 0);
   assert.match(r.stdout, /Remember this line\./);

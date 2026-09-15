@@ -2,8 +2,7 @@
   "name": "coda",
   "displayName": "Coda",
   "version": "0.1.0",
-  "description": "Speak a smart digest of the last finished assistant reply. Listen/mute toggle. Reusable TTS engine.",
-  "hooks": "hooks/hooks.json",
+  "description": "Highlight text on your Mac and hear it read aloud. Includes a reusable speak engine.",
   "rules": ["rules/coda-spoken-summary.mdc"],
   "skills": ["skills/add-coda/SKILL.md"]
 }

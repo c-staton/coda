@@ -1,10 +1,7 @@
 #!/usr/bin/env node
-// Cursor afterAgentResponse hook entrypoint.
+// Optional Cursor afterAgentResponse entrypoint.
 // Cursor pipes { "text": "<final assistant reply>", ... } on stdin.
-// We hand that straight to `coda hook`, which digests + speaks if listening.
-//
-// Relative path keeps GitHub plugin install working; a user-level
-// ~/.cursor/hooks.json can point at this file with an absolute path instead.
+// `coda hook` exits quietly (Coda does not auto-speak Cursor replies).
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
@@ -14,4 +11,4 @@ const cli = join(here, "..", "src", "cli.mjs");
 
 const child = spawn(process.execPath, [cli, "hook"], { stdio: "inherit" });
 child.on("exit", (code) => process.exit(code || 0));
-child.on("error", () => process.exit(0)); // never break the agent loop
+child.on("error", () => process.exit(0));

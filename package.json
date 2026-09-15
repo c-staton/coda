@@ -1,7 +1,7 @@
 {
   "name": "coda",
   "version": "0.1.0",
-  "description": "Speak a smart digest of the last finished assistant reply. Reusable TTS engine + Cursor afterAgentResponse hook.",
+  "description": "Highlight text on your Mac and hear it read aloud.",
   "type": "module",
   "bin": {
     "coda": "src/cli.mjs"
@@ -21,11 +21,30 @@
   },
   "files": [
     "src",
+    "apps/macos",
     "scripts",
     "hooks",
     "rules",
     "skills",
-    "README.md"
+    "README.md",
+    "LICENSE",
+    "CONTRIBUTING.md",
+    "SECURITY.md"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/c-staton/coda.git"
+  },
+  "bugs": {
+    "url": "https://github.com/c-staton/coda/issues"
+  },
+  "homepage": "https://github.com/c-staton/coda#readme",
+  "keywords": [
+    "tts",
+    "text-to-speech",
+    "macos",
+    "accessibility",
+    "grok"
   ],
   "license": "MIT"
 }

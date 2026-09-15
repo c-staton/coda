@@ -179,4 +179,44 @@ function clampToBatchLimit(text) {
   return text.slice(0, BATCH_LIMIT);
 }
 
+/**
+ * Split a finished reply into Speechify-style playable blocks.
+ * Code/tables are dropped; long paragraphs are broken on sentence boundaries.
+ */
+export function splitBlocks(text, options = {}) {
+  const maxBlockChars = options.maxBlockChars || 360;
+  if (typeof text !== "string" || !text.trim()) return [];
+
+  let prose = stripFencedCode(text);
+  prose = stripTables(prose);
+  prose = stripBlockMarkdown(prose);
+  prose = stripInlineNoise(prose);
+
+  const paras = prose
+    .split(/\n\s*\n/)
+    .map((p) => collapseWhitespace(p))
+    .filter((p) => p.length >= 3 && /[a-zA-Z0-9]/.test(p));
+
+  const blocks = [];
+  for (const para of paras) {
+    if (para.length <= maxBlockChars) {
+      blocks.push(para);
+      continue;
+    }
+    const sentences = splitSentences(para);
+    let buf = "";
+    for (const sentence of sentences) {
+      const next = buf ? `${buf} ${sentence}` : sentence;
+      if (buf && next.length > maxBlockChars) {
+        blocks.push(buf);
+        buf = sentence;
+      } else {
+        buf = next;
+      }
+    }
+    if (buf) blocks.push(buf);
+  }
+  return blocks;
+}
+
 export default digest;

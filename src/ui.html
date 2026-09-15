@@ -1,0 +1,242 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Coda</title>
+  <link rel="icon" href="/icon.png" type="image/png" />
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #141414;
+      --fg: #ededed;
+      --muted: #8a8a8a;
+      --line: #2a2a2a;
+      --fill: #1c1c1c;
+      --hover: #262626;
+      --sel: #2f2f2f;
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      min-height: 100%;
+      background: var(--bg);
+      color: var(--fg);
+      font: 13px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    main {
+      max-width: 420px;
+      margin: 0 auto;
+      padding: 24px 22px 36px;
+    }
+    header { margin-bottom: 14px; }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .brand img {
+      width: 28px;
+      height: 28px;
+      display: block;
+      filter: invert(1);
+    }
+    .brand img.busy {
+      animation: coda-pulse 0.7s ease-in-out infinite;
+    }
+    @keyframes coda-pulse {
+      50% { opacity: 0.28; }
+    }
+    h1 {
+      margin: 0;
+      font-size: 15px;
+      font-weight: 600;
+      letter-spacing: -0.02em;
+    }
+    .sub {
+      margin: 4px 0 0;
+      color: var(--muted);
+    }
+    section { border-top: 1px solid var(--line); }
+    .row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      min-height: 40px;
+      padding: 8px 0;
+    }
+    .label { color: var(--fg); }
+    .hint { color: var(--muted); }
+    .now {
+      margin: 0;
+      color: var(--muted);
+      display: -webkit-box;
+      -webkit-line-clamp: 3;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+    button {
+      appearance: none;
+      border: 0;
+      background: transparent;
+      color: var(--fg);
+      font: inherit;
+      cursor: pointer;
+    }
+    .ghost {
+      border: 1px solid var(--line);
+      background: var(--fill);
+      border-radius: 6px;
+      padding: 7px 12px;
+      color: var(--fg);
+    }
+    .ghost:hover { background: var(--hover); }
+    .kbd {
+      border: 1px solid var(--line);
+      background: var(--fill);
+      border-radius: 6px;
+      padding: 4px 8px;
+      font: 12px ui-monospace, SFMono-Regular, Menlo, monospace;
+      color: var(--fg);
+    }
+    .kbd.recording { border-color: var(--fg); }
+    .voices { display: flex; flex-wrap: wrap; gap: 6px; padding: 4px 0 12px; }
+    .voice {
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 4px 10px;
+      color: var(--muted);
+    }
+    .voice.selected {
+      background: var(--sel);
+      color: var(--fg);
+      border-color: #3a3a3a;
+    }
+    .status { color: var(--muted); font-size: 12px; }
+    .err { color: #d0a0a0; }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <div class="brand">
+        <img id="brandIcon" src="/icon.png" alt="" width="28" height="28" />
+        <h1>Coda</h1>
+      </div>
+      <p class="sub">Highlight text, then play it.</p>
+    </header>
+
+    <section>
+      <div class="row">
+        <div>
+          <div class="label">Now</div>
+          <p class="now" id="now">Nothing yet</p>
+        </div>
+        <div class="status" id="status"></div>
+      </div>
+      <div class="row">
+        <button class="ghost" id="playHighlight">Play / pause</button>
+      </div>
+    </section>
+
+    <section>
+      <div class="row">
+        <div>
+          <div class="label">Shortcut</div>
+          <div class="hint">Play, pause, or start a new highlight</div>
+        </div>
+        <button class="kbd" id="hotkeyPlay">Control-Option-X</button>
+      </div>
+    </section>
+
+    <section>
+      <div class="row">
+        <div class="label">Voice</div>
+        <div class="hint" id="engineHint"></div>
+      </div>
+      <div class="voices" id="voices"></div>
+    </section>
+  </main>
+  <script>
+    const $ = (id) => document.getElementById(id);
+    let state = null;
+    let lastSig = "";
+    let lastError = "";
+    let recording = "";
+
+    async function api(path, body) {
+      const res = await fetch(path, {
+        method: body ? "POST" : "GET",
+        headers: body ? { "content-type": "application/json" } : undefined,
+        body: body ? JSON.stringify(body) : undefined,
+      });
+      state = await res.json();
+      if (path !== "/api/state") {
+        lastError = "";
+        if (state.grab && !state.grab.ok) lastError = state.grab.note || "Couldn’t read the highlight.";
+        else if (state.reason && state.ok === false) lastError = state.reason;
+      }
+      render();
+      return state;
+    }
+
+    function render() {
+      if (!state) return;
+      const labels = state.hotkeyLabels || {};
+      const sig = JSON.stringify({
+        voice: state.voice,
+        lastDigest: state.lastDigest,
+        playing: state.playing,
+        paused: state.paused,
+        loading: state.loading,
+        lastError,
+        labels,
+        recording,
+      });
+      if (sig === lastSig) return;
+      lastSig = sig;
+      $("now").textContent = state.lastDigest || "Nothing yet";
+      $("engineHint").textContent = state.voice || "";
+      $("status").className = "status" + (lastError ? " err" : "");
+      $("status").textContent = lastError || (state.loading ? "Getting the voice…" : state.paused ? "Paused" : state.playing ? "Playing" : "");
+      $("brandIcon").classList.toggle("busy", Boolean(state.loading));
+      $("hotkeyPlay").textContent = recording === "play" ? "Press keys…" : (labels.play || "Control-Option-X");
+      $("hotkeyPlay").classList.toggle("recording", recording === "play");
+      $("voices").innerHTML = (state.voices || []).map((v) => `
+        <button class="voice ${state.voice === v.id ? "selected" : ""}" data-voice="${v.id}">${v.label}</button>
+      `).join("");
+    }
+
+    $("playHighlight").onclick = () => api("/api/grab", { mode: "selection" });
+    $("voices").onclick = (e) => {
+      const btn = e.target.closest("[data-voice]");
+      if (btn) api("/api/voice", { voice: btn.dataset.voice });
+    };
+    $("hotkeyPlay").onclick = () => { recording = "play"; lastSig = ""; render(); };
+    window.addEventListener("keydown", (e) => {
+      if (!recording) return;
+      if (e.key === "Escape") {
+        recording = "";
+        lastSig = "";
+        render();
+        return;
+      }
+      const mods = [];
+      if (e.ctrlKey) mods.push("control");
+      if (e.altKey) mods.push("option");
+      if (e.shiftKey) mods.push("shift");
+      if (e.metaKey) mods.push("command");
+      const key = e.key.length === 1 ? e.key.toLowerCase() : "";
+      if (!key || !mods.length) return;
+      e.preventDefault();
+      const action = recording;
+      recording = "";
+      api("/api/hotkeys", { action, hotkey: { key, mods } });
+    });
+
+    api("/api/state");
+    setInterval(() => api("/api/state"), 1500);
+  </script>
+</body>
+</html>

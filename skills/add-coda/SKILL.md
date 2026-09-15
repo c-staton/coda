@@ -1,40 +1,36 @@
 ---
 name: add-coda
-description: Wire the Coda speak engine into another app (Grok bot, Mac reader, etc.) so it speaks a smart digest of that app's last finished reply, with a listen/mute toggle.
+description: Wire Coda’s speak engine into another app so it can read text aloud.
 ---
 
 # Add Coda to an app
 
-Coda's core (`src/digest.mjs`, `src/tts.mjs`, `src/state.mjs`) has no Cursor types.
-Reuse it anywhere you have a "last finished reply" and want to speak a smart digest.
+Coda’s core (`src/digest.mjs`, `src/tts.mjs`, `src/state.mjs`) has no Mac-only types.
+Reuse it anywhere you have text and want to speak it.
 
 ## Steps
 
 1. Import the engine:
 
    ```js
-   import { digest, speak, getState } from "coda";
+   import { digest, speak } from "coda";
    ```
 
-2. When your app finishes a reply, digest then speak (respecting the mute toggle):
+2. When you have text, digest then speak:
 
    ```js
-   if (getState().listening) {
-     const spoken = digest(finalReplyText, { maxChars: 800 });
-     if (spoken) await speak(spoken, { engine: "grok", voice: "eve", language: "auto" });
-   }
+   const spoken = digest(finalReplyText, { maxChars: 800 });
+   if (spoken) await speak(spoken, { engine: "grok", voice: "eve", language: "auto" });
    ```
-
-3. Expose a mute toggle in your app UI that flips `listening` via `setState({ listening })`,
-   or shell out to `coda on|off|toggle`.
 
 ## Engine choice
 
-- `apple` / `espeak`: local, zero-key. Good default before API keys exist.
-- `grok`: xAI Grok TTS. Set `XAI_API_KEY`. Voices: `eve` (default), `ara`, `rex`, `leo`, `luna`.
+- `apple` / `espeak`: local, no key. Good default.
+- `openrouter`: Grok voices via OpenRouter. Set `OPENROUTER_API_KEY`.
+- `grok`: xAI Grok TTS. Set `XAI_API_KEY`. Voices: `eve` (default), `ara`, `rex`, `leo`, `sal`.
 - `openai`: OpenAI Speech. Set `OPENAI_API_KEY`.
 
-Never ship API keys in a client bundle or commit them. Keep them in the user's env.
+Never ship API keys in a client bundle or commit them. Keep them in the user’s env or `~/.coda/secrets.json`.
 
 ## Digest contract
 

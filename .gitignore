@@ -1,6 +1,17 @@
 node_modules/
 .env
 .env.*
+!.env.example
 *.mp3
+*.wav
+*.aiff
 .DS_Store
 .voice-logs/
+secrets.json
+**/.coda/
+last-utterance.*
+*.pem
+coverage/
+.idea/
+.vscode/
+*.log

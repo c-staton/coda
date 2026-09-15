@@ -1,24 +1,47 @@
-// One-command install/uninstall of the Coda user-level Cursor hook.
-//
-// Wires ~/.cursor/hooks.json so Coda speaks after every finished assistant
-// reply, in every project, without installing the plugin per repo. Idempotent
-// and non-destructive: it merges into any existing hooks and never drops other
-// entries.
+// Install Coda on this machine: remember where the repo lives, build the
+// Mac menu app, and optionally wire the (quiet) Cursor hook.
 import { homedir } from "node:os";
 import { join, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { spawnSync } from "node:child_process";
 import {
   mkdirSync,
   readFileSync,
   writeFileSync,
   existsSync,
+  chmodSync,
+  copyFileSync,
 } from "node:fs";
+import { paths } from "./state.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 
-// Absolute path to the hook entrypoint Cursor will run.
+export function repoRoot() {
+  return resolve(join(here, ".."));
+}
+
 export function hookScriptPath() {
   return resolve(join(here, "..", "scripts", "after-agent-response.mjs"));
+}
+
+export function cliPath() {
+  return resolve(join(here, "cli.mjs"));
+}
+
+export function swiftSourcePath() {
+  return resolve(join(here, "..", "apps", "macos", "CodaBar.swift"));
+}
+
+export function menuIconPath() {
+  return resolve(join(here, "..", "apps", "macos", "MenuIcon.png"));
+}
+
+export function codaBarBinPath() {
+  return join(paths.CODA_DIR, "bin", "CodaBar");
+}
+
+export function installPathsFile() {
+  return join(paths.CODA_DIR, "paths.json");
 }
 
 function cursorDir() {
@@ -41,7 +64,6 @@ function readHooks(path) {
   try {
     parsed = JSON.parse(raw);
   } catch {
-    // Never clobber a config we can't understand.
     throw new Error(
       `Your ${path} is not valid JSON. Fix or remove it, then run install again.`
     );
@@ -65,6 +87,125 @@ function isCodaEntry(entry) {
     typeof entry.command === "string" &&
     entry.command.includes("after-agent-response.mjs")
   );
+}
+
+export function writeInstallPaths() {
+  mkdirSync(paths.CODA_DIR, { recursive: true });
+  const rec = {
+    node: process.execPath,
+    cli: cliPath(),
+    repo: repoRoot(),
+  };
+  writeFileSync(installPathsFile(), JSON.stringify(rec, null, 2) + "\n", "utf8");
+  return rec;
+}
+
+function which(cmd) {
+  const r = spawnSync("which", [cmd], { encoding: "utf8" });
+  return r.status === 0 ? (r.stdout || "").trim() : "";
+}
+
+export function installMacApp() {
+  if (process.platform !== "darwin") {
+    return { skipped: true, reason: "Coda’s menu lives on macOS." };
+  }
+  if (process.env.CODA_SKIP_APP === "1") {
+    return { skipped: true, reason: "skipped" };
+  }
+  const src = swiftSourcePath();
+  if (!existsSync(src)) {
+    return { ok: false, reason: `missing ${src}` };
+  }
+  const swiftc = which("swiftc");
+  if (!swiftc) {
+    return {
+      ok: false,
+      reason:
+        "Need Apple’s command line tools to build the menu app.\n  Run: xcode-select --install",
+    };
+  }
+  const bin = codaBarBinPath();
+  mkdirSync(dirname(bin), { recursive: true });
+  const already = existsSync(bin);
+  const r = spawnSync(
+    swiftc,
+    [
+      "-O",
+      "-o",
+      bin,
+      src,
+      "-framework",
+      "AppKit",
+      "-framework",
+      "ApplicationServices",
+      "-framework",
+      "Carbon",
+      "-framework",
+      "AVFoundation",
+    ],
+    { encoding: "utf8" }
+  );
+  if (r.status !== 0) {
+    return {
+      ok: false,
+      reason: (r.stderr || r.stdout || "could not build the menu app").trim(),
+    };
+  }
+  try {
+    chmodSync(bin, 0o755);
+  } catch {
+    // ignore
+  }
+  const icon = menuIconPath();
+  if (existsSync(icon)) {
+    try {
+      copyFileSync(icon, join(dirname(bin), "MenuIcon.png"));
+    } catch {
+      // icon is optional; the menu still works
+    }
+  }
+  spawnSync("pkill", ["-f", bin], { stdio: "ignore" });
+  spawnSync("open", [bin], { stdio: "ignore" });
+  addLoginItem(bin);
+  return { ok: true, bin, already };
+}
+
+function addLoginItem(appPath) {
+  if (process.platform !== "darwin") return;
+  spawnSync(
+    "osascript",
+    [
+      "-e",
+      `tell application "System Events"
+        if (count of (every login item whose path is "${appPath}")) is 0 then
+          make login item at end with properties {path:"${appPath}", hidden:true}
+        end if
+      end tell`,
+    ],
+    { stdio: "ignore" }
+  );
+}
+
+function removeLoginItem(appPath) {
+  if (process.platform !== "darwin") return;
+  spawnSync(
+    "osascript",
+    [
+      "-e",
+      `tell application "System Events" to delete (every login item whose path is "${appPath}")`,
+    ],
+    { stdio: "ignore" }
+  );
+}
+
+export function uninstallMacApp() {
+  const bin = codaBarBinPath();
+  const existed = existsSync(bin);
+  if (existed) {
+    spawnSync("pkill", ["-f", bin], { stdio: "ignore" });
+    removeLoginItem(bin);
+  }
+  return { existed, bin };
 }
 
 export function installHook() {
@@ -98,4 +239,17 @@ export function uninstallHook() {
 
   writeHooks(path, config);
   return { path, removed, existed: true };
+}
+
+export function installAll({ cursor = false } = {}) {
+  const written = writeInstallPaths();
+  const app = installMacApp();
+  const hook = cursor ? installHook() : null;
+  return { paths: written, app, hook };
+}
+
+export function uninstallAll() {
+  const hook = uninstallHook();
+  const app = uninstallMacApp();
+  return { hook, app };
 }
