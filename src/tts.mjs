@@ -13,13 +13,29 @@
 // We never `killall` a player, so unrelated audio is left alone.
 
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  renameSync,
+  statSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { paths, getState, setState } from "./state.mjs";
 import { getApiKey } from "./secrets.mjs";
 import { installedCodaBin } from "./install.mjs";
 import { forSpeech } from "./secret-text.mjs";
+import { allowedModel, DEFAULT_MODEL } from "./voices.mjs";
+
+export function liveVoiceConfig(config) {
+  if (allowedModel(config.model)) return config;
+  return { ...config, model: DEFAULT_MODEL, voice: "ara" };
+}
 
 function has(cmd) {
   const r = spawnSync("which", [cmd], { stdio: "ignore" });
@@ -99,11 +115,8 @@ function stopCurrent() {
 
 export function pauseCurrent() {
   if (codaCtl("pause")) {
-    const p = readPlayback();
-    if (p?.paused) {
-      setState({ paused: true });
-      return { ok: true };
-    }
+    setState({ paused: true });
+    return { ok: true };
   }
   return { ok: false, reason: "nothing playing" };
 }
@@ -117,11 +130,8 @@ export function togglePause() {
 
 export function resumeCurrent() {
   if (codaCtl("resume")) {
-    const p = readPlayback();
-    if (p?.playing) {
-      setState({ paused: false });
-      return { ok: true };
-    }
+    setState({ paused: false });
+    return { ok: true };
   }
   return { ok: false, reason: "nothing to resume" };
 }
@@ -166,14 +176,93 @@ function playFile(path, { wait = false } = {}) {
   return { played: true, player, pid: child.pid };
 }
 
-function outPath(ext) {
-  return join(paths.CODA_DIR, `last-utterance.${ext}`);
+function clipsDir() {
+  const dir = join(paths.CODA_DIR, "clips");
+  mkdirSync(dir, { recursive: true });
+  return dir;
+}
+
+export function clipId(text, config) {
+  const c = liveVoiceConfig(config || {});
+  return createHash("sha1")
+    .update(`${c.model || ""}|${c.voice || ""}|${c.speed || 1}|${forSpeech(text)}`)
+    .digest("hex")
+    .slice(0, 20);
+}
+
+export function clipFile(text, config, ext) {
+  return join(clipsDir(), `${clipId(text, config)}.${ext}`);
+}
+
+export function findCachedClip(text, config) {
+  for (const ext of ["mp3", "wav", "aiff"]) {
+    const p = clipFile(text, config, ext);
+    try {
+      if (existsSync(p) && statSync(p).size > 32) return p;
+    } catch {
+      // missing
+    }
+  }
+  return null;
+}
+
+function writeAtomic(path, buf) {
+  const tmp = `${path}.tmp`;
+  writeFileSync(tmp, buf);
+  renameSync(tmp, path);
+}
+
+function pruneClips(keepPath) {
+  const dir = clipsDir();
+  let files = [];
+  try {
+    files = readdirSync(dir).filter((f) => !f.endsWith(".tmp"));
+  } catch {
+    return;
+  }
+  if (files.length <= 24) return;
+  const rows = files
+    .map((f) => {
+      const p = join(dir, f);
+      let mtime = 0;
+      try {
+        mtime = statSync(p).mtimeMs;
+      } catch {
+        mtime = 0;
+      }
+      return { p, mtime };
+    })
+    .sort((a, b) => a.mtime - b.mtime);
+  for (const row of rows.slice(0, rows.length - 24)) {
+    if (row.p === keepPath) continue;
+    try {
+      unlinkSync(row.p);
+    } catch {
+      // busy
+    }
+  }
+}
+
+export function clearClipCache() {
+  const dir = join(paths.CODA_DIR, "clips");
+  let files = [];
+  try {
+    files = readdirSync(dir);
+  } catch {
+    return;
+  }
+  for (const f of files) {
+    try {
+      unlinkSync(join(dir, f));
+    } catch {
+      // busy
+    }
+  }
 }
 
 function synthEspeak(text, config) {
   const bin = has("espeak-ng") ? "espeak-ng" : "espeak";
-  const wav = outPath("wav");
-  // words-per-minute from speed (175 wpm is espeak default)
+  const wav = clipFile(text, config, "wav");
   const wpm = Math.max(80, Math.round(175 * (config.speed || 1)));
   const args = ["-w", wav, "-s", String(wpm), text];
   const r = spawnSync(bin, args, { stdio: "ignore" });
@@ -182,7 +271,7 @@ function synthEspeak(text, config) {
 }
 
 function synthApple(text, config) {
-  const aiff = outPath("aiff");
+  const aiff = clipFile(text, config, "aiff");
   const wpm = Math.max(80, Math.round(175 * (config.speed || 1)));
   const r = spawnSync("say", ["-r", String(wpm), "-o", aiff, text], {
     stdio: "ignore",
@@ -191,7 +280,32 @@ function synthApple(text, config) {
   return aiff;
 }
 
-async function synthHttp(url, headers, body, ext) {
+function pcmToWav(pcm, sampleRate = 24000) {
+  if (pcm.length >= 12 && pcm.subarray(0, 4).toString("ascii") === "RIFF") return pcm;
+  const dataSize = pcm.length;
+  const header = Buffer.alloc(44);
+  header.write("RIFF", 0);
+  header.writeUInt32LE(36 + dataSize, 4);
+  header.write("WAVE", 8);
+  header.write("fmt ", 12);
+  header.writeUInt32LE(16, 16);
+  header.writeUInt16LE(1, 20);
+  header.writeUInt16LE(1, 22);
+  header.writeUInt32LE(sampleRate, 24);
+  header.writeUInt32LE(sampleRate * 2, 28);
+  header.writeUInt16LE(2, 32);
+  header.writeUInt16LE(16, 34);
+  header.write("data", 36);
+  header.writeUInt32LE(dataSize, 40);
+  return Buffer.concat([header, pcm]);
+}
+
+export function speechFormat(model) {
+  if (String(model || "").startsWith("google/gemini")) return "pcm";
+  return "mp3";
+}
+
+async function synthHttp(url, headers, body, ext, destPath) {
   const res = await fetch(url, {
     method: "POST",
     headers: { "content-type": "application/json", ...headers },
@@ -201,10 +315,15 @@ async function synthHttp(url, headers, body, ext) {
     const detail = await res.text().catch(() => "");
     throw new Error(`TTS request failed (${res.status}): ${detail.slice(0, 200)}`);
   }
-  const buf = Buffer.from(await res.arrayBuffer());
-  const path = outPath(ext);
-  writeFileSync(path, buf);
-  return path;
+  let buf = Buffer.from(await res.arrayBuffer());
+  let outExt = ext;
+  if (ext === "pcm") {
+    buf = pcmToWav(buf);
+    outExt = "wav";
+  }
+  const dest = destPath || clipFile(body?.input || "clip", {}, outExt);
+  writeAtomic(dest, buf);
+  return dest;
 }
 
 export function grokRequestBody(text, config) {
@@ -224,16 +343,18 @@ function synthGrok(text, config) {
     "https://api.x.ai/v1/tts",
     { authorization: `Bearer ${key}` },
     grokRequestBody(text, config),
-    "mp3"
+    "mp3",
+    clipFile(text, config, "mp3")
   );
 }
 
 export function openrouterRequestBody(text, config) {
+  const model = config.model || "x-ai/grok-voice-tts-1.0";
   return {
-    model: config.model || "x-ai/grok-voice-tts-1.0",
+    model,
     input: text,
     voice: config.voice || "eve",
-    response_format: "mp3",
+    response_format: speechFormat(model),
     speed: config.speed || 1.0,
   };
 }
@@ -241,6 +362,8 @@ export function openrouterRequestBody(text, config) {
 function synthOpenrouter(text, config) {
   const key = getApiKey("openrouter");
   if (!key) throw new Error("OPENROUTER_API_KEY is not set (run: coda key openrouter)");
+  const body = openrouterRequestBody(text, config);
+  const ext = body.response_format === "pcm" ? "wav" : body.response_format;
   return synthHttp(
     "https://openrouter.ai/api/v1/audio/speech",
     {
@@ -248,8 +371,9 @@ function synthOpenrouter(text, config) {
       "http-referer": "https://github.com/c-staton/coda",
       "x-title": "Coda",
     },
-    openrouterRequestBody(text, config),
-    "mp3"
+    body,
+    body.response_format,
+    clipFile(text, config, ext)
   );
 }
 
@@ -265,11 +389,63 @@ function synthOpenai(text, config) {
       input: text,
       speed: config.speed || 1.0,
     },
-    "mp3"
+    "mp3",
+    clipFile(text, config, "mp3")
   );
 }
 
+const synthJobs = new Map();
+
+export function synthesize(text, config, options = {}) {
+  config = liveVoiceConfig(config);
+  const engine = resolveEngine(config);
+  const spoken = forSpeech(text);
+  if (!spoken) return Promise.resolve({ engine, audioPath: null });
+  if (engine === "print") return Promise.resolve({ engine, audioPath: null, print: spoken });
+  const id = clipId(spoken, config);
+  const existing = synthJobs.get(id);
+  if (existing) return existing;
+  const job = synthesizeNow(spoken, config, engine, options).finally(() => synthJobs.delete(id));
+  synthJobs.set(id, job);
+  return job;
+}
+
+async function synthesizeNow(spoken, config, engine, options) {
+  const cached = findCachedClip(spoken, config);
+  if (cached) return { engine, audioPath: cached, cached: true };
+  if (options.showLoading) codaCtl("loading");
+  let audioPath;
+  try {
+    if (engine === "espeak") audioPath = synthEspeak(spoken, config);
+    else if (engine === "apple") audioPath = synthApple(spoken, config);
+    else if (engine === "grok") audioPath = await synthGrok(spoken, config);
+    else if (engine === "openai") audioPath = await synthOpenai(spoken, config);
+    else if (engine === "openrouter") audioPath = await synthOpenrouter(spoken, config);
+    else throw new Error(`Unknown engine: ${engine}`);
+  } catch (err) {
+    if (options.showLoading) codaCtl("stop");
+    throw err;
+  }
+  pruneClips(audioPath);
+  return { engine, audioPath };
+}
+
+export function playPrepared(audioPath, options = {}) {
+  const startedAt = Number(options.startedAt) || 0;
+  if (startedAt) {
+    const s = getState();
+    if (Number(s.queueSkipAt || 0) > startedAt || Number(s.queueStopAt || 0) > startedAt) {
+      codaCtl("stop");
+      return { played: false, aborted: true, audioPath };
+    }
+  }
+  if (!audioPath) return { played: false, audioPath: null };
+  const { played, player } = playFile(audioPath, { wait: Boolean(options.wait) });
+  return { played, player, audioPath };
+}
+
 export async function speak(text, config, options = {}) {
+  config = liveVoiceConfig(config);
   const engine = resolveEngine(config);
   const spoken = forSpeech(text);
 
@@ -281,22 +457,10 @@ export async function speak(text, config, options = {}) {
     return { engine, played: false, audioPath: null };
   }
 
-  codaCtl("loading");
-  let audioPath;
-  try {
-    if (engine === "espeak") audioPath = synthEspeak(spoken, config);
-    else if (engine === "apple") audioPath = synthApple(spoken, config);
-    else if (engine === "grok") audioPath = await synthGrok(spoken, config);
-    else if (engine === "openai") audioPath = await synthOpenai(spoken, config);
-    else if (engine === "openrouter") audioPath = await synthOpenrouter(spoken, config);
-    else throw new Error(`Unknown engine: ${engine}`);
-  } catch (err) {
-    codaCtl("stop");
-    throw err;
-  }
-
-  const { played, player } = playFile(audioPath, { wait: Boolean(options.wait) });
-  return { engine, played, player, audioPath };
+  const prepared = await synthesize(spoken, config, { showLoading: options.showLoading !== false });
+  if (!prepared.audioPath) return { engine, played: false, audioPath: null };
+  const out = playPrepared(prepared.audioPath, options);
+  return { engine, ...out };
 }
 
 export { stopCurrent };

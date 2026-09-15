@@ -1,13 +1,15 @@
 #!/usr/bin/env node
 // coda CLI: install | speak | key | ui | stop
 import { digest } from "./digest.mjs";
-import { speak, resolveEngine, pauseCurrent, resumeCurrent, stopCurrent, togglePause } from "./tts.mjs";
+import { speak, resolveEngine, pauseCurrent, resumeCurrent } from "./tts.mjs";
 import { getState, getConfig, setConfig, rememberSpoken } from "./state.mjs";
-import { cancelFollow, playRaw, playGrab, playOrToggle } from "./player.mjs";
+import { playRaw, playGrab, playOrToggle, skipCurrent, stopAll, togglePlayback } from "./player.mjs";
 import { startUiServer } from "./ui-server.mjs";
 import { installAll, uninstallAll } from "./install.mjs";
 import { setApiKey, hasApiKey } from "./secrets.mjs";
 import { forSpeech } from "./secret-text.mjs";
+import { formatSpeed, normalizeSpeed } from "./speed.mjs";
+import { companyLabel, fallbackVoiceGroups, formatVoiceChoice, parseVoiceKey, writeVoiceCatalog } from "./voices.mjs";
 
 function readStdin() {
   return new Promise((resolve) => {
@@ -24,8 +26,8 @@ function printStatus() {
   const s = getState();
   const c = getConfig();
   const engine = resolveEngine(c);
-  const extra = engine === "openrouter" ? ` | model ${c.model}` : "";
-  process.stdout.write(`coda: engine ${engine} | voice ${c.voice}${extra}\n`);
+  const extra = engine === "openrouter" ? ` | ${companyLabel(c.model)}` : "";
+  process.stdout.write(`coda: engine ${engine} | voice ${c.voice} | speed ${formatSpeed(c.speed)}${extra}\n`);
   if (s.lastSpokenAt) {
     process.stdout.write(
       `last spoken ${s.lastSpokenAt}: "${(s.lastDigest || "").slice(0, 80)}"\n`
@@ -43,7 +45,6 @@ async function speakText(text, { wait = false } = {}) {
 }
 
 const ENGINES = ["auto", "apple", "espeak", "grok", "openai", "openrouter", "print"];
-const GROK_VOICES = ["eve", "ara", "rex", "leo", "sal"];
 const KEY_KINDS = { xai: "xai", openai: "openai", openrouter: "openrouter", or: "openrouter" };
 
 async function main() {
@@ -77,13 +78,18 @@ async function main() {
       return r.ok ? 0 : 1;
     }
     case "toggle-pause": {
-      const r = togglePause();
-      process.stdout.write(r.ok ? `coda: ${r.action === "resume" ? "resumed" : "paused"}\n` : `coda: ${r.reason}\n`);
+      const r = togglePlayback();
+      const word = r.action === "resume" ? "resumed" : r.action === "play" ? "playing" : "paused";
+      process.stdout.write(r.ok ? `coda: ${word}\n` : `coda: ${r.reason}\n`);
       return r.ok ? 0 : 1;
     }
+    case "skip": {
+      const r = skipCurrent();
+      process.stdout.write(r.queueCount ? `coda: skipped · ${r.queueCount} waiting\n` : "coda: skipped\n");
+      return 0;
+    }
     case "stop":
-      cancelFollow();
-      stopCurrent();
+      stopAll();
       process.stdout.write("coda: stopped\n");
       return 0;
     case "read": {
@@ -185,18 +191,30 @@ async function main() {
       printStatus();
       return 0;
     }
-    case "voice": {
-      const name = (rest[0] || "").toLowerCase();
-      if (!name) {
-        process.stdout.write(`coda: voice ${getConfig().voice}\n`);
+    case "speed": {
+      if (!rest[0]) {
+        process.stdout.write(`coda: speed ${formatSpeed(getConfig().speed)}\n`);
         return 0;
       }
-      setConfig({ voice: name });
-      process.stdout.write(`coda: voice ${name}\n`);
-      const engine = resolveEngine(getConfig());
-      if ((engine === "grok" || engine === "openrouter") && !GROK_VOICES.includes(name)) {
-        process.stdout.write(`  tip: Grok voices are ${GROK_VOICES.join(", ")}\n`);
+      const speed = normalizeSpeed(rest[0]);
+      setConfig({ speed });
+      process.stdout.write(`coda: speed ${formatSpeed(speed)}\n`);
+      return 0;
+    }
+    case "voice": {
+      const raw = rest[0] || "";
+      if (!raw) {
+        const c = getConfig();
+        process.stdout.write(`coda: voice ${formatVoiceChoice(c.model, c.voice)}\n`);
+        return 0;
       }
+      const picked = parseVoiceKey(raw);
+      setConfig({
+        voice: picked.voice,
+        model: picked.model,
+        engine: hasApiKey("openrouter") ? "openrouter" : getConfig().engine,
+      });
+      process.stdout.write(`coda: voice ${formatVoiceChoice(picked.model, picked.voice)}\n`);
       return 0;
     }
     case "key": {
@@ -218,7 +236,8 @@ async function main() {
       let label = "OpenAI";
       if (kind === "openrouter") {
         setConfig({ engine: "openrouter", model: "x-ai/grok-voice-tts-1.0", voice: "eve" });
-        label = "OpenRouter → Grok Eve";
+        writeVoiceCatalog(fallbackVoiceGroups());
+        label = "OpenRouter";
       } else if (kind === "xai") {
         setConfig({ engine: "grok", voice: getConfig().voice || "eve" });
         label = "Grok (eve)";
@@ -252,7 +271,7 @@ async function main() {
       if (r.app?.ok) {
         process.stdout.write(
           `  app: ${r.app.app}\n\n` +
-            "Highlight text in any app, then press Control-Option-X.\n" +
+            "Highlight text in any app, then press Control-Option-Down.\n" +
             "When macOS asks, turn on Coda under Privacy & Security → Accessibility.\n" +
             "It should say Coda. Leave Node and Terminal off.\n" +
             "Open Coda from the menu and paste your OpenRouter key for a better voice.\n" +
@@ -289,7 +308,7 @@ async function main() {
     default:
       process.stderr.write(
         `coda: unknown command "${cmd}"\n` +
-          "usage: coda install|uninstall|status|engine|voice|key|speak|pause|resume|stop|ui|replay|play-selection\n"
+          "usage: coda install|uninstall|status|engine|voice|speed|key|speak|pause|resume|skip|stop|ui|replay|play-selection\n"
       );
       return 1;
   }

@@ -5,11 +5,22 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { spawn } from "node:child_process";
 import { digest } from "./digest.mjs";
-import { speak, resolveEngine, pauseCurrent, resumeCurrent, stopCurrent, playbackStatus, togglePause } from "./tts.mjs";
+import { speak, resolveEngine, pauseCurrent, resumeCurrent, playbackStatus, liveVoiceConfig } from "./tts.mjs";
 import { getState, getConfig, setConfig, rememberSpoken, paths } from "./state.mjs";
-import { playGrab, cancelFollow } from "./player.mjs";
-import { formatHotkeys, normalizeHotkeys, DEFAULT_HOTKEYS, HOTKEY_ACTIONS } from "./hotkeys.mjs";
+import { playGrab, skipCurrent, stopAll, listQueue, queueCount, togglePlayback } from "./player.mjs";
+import { writeQueueBadge } from "./queue.mjs";
+import { formatHotkeys, normalizeHotkeys, DEFAULT_HOTKEYS, HOTKEY_ACTIONS, hotkeyLabelsClash } from "./hotkeys.mjs";
+import { normalizeSpeed, speedChoices } from "./speed.mjs";
 import { setApiKey, clearApiKey, hasApiKey } from "./secrets.mjs";
+import {
+  DEFAULT_MODEL,
+  DEFAULT_VOICE,
+  formatVoiceChoice,
+  loadVoiceGroups,
+  parseVoiceKey,
+  voiceKey,
+  writeVoiceCatalog,
+} from "./voices.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const HTML_PATH = join(here, "ui.html");
@@ -17,29 +28,35 @@ const ICON_PATH = join(here, "..", "apps", "macos", "MenuIcon.png");
 const PORT = Number(process.env.CODA_UI_PORT || 8787);
 const HOST = "127.0.0.1";
 
-const VOICES = [
-  { id: "eve", label: "Eve", hint: "Upbeat, default" },
-  { id: "ara", label: "Ara", hint: "Warm, friendly" },
-  { id: "rex", label: "Rex", hint: "Clear, confident" },
-  { id: "leo", label: "Leo", hint: "Strong, instructional" },
-  { id: "sal", label: "Sal", hint: "Smooth, balanced" },
-];
-
-function snapshot() {
+async function snapshot() {
   const state = getState();
-  const config = getConfig();
+  let config = getConfig();
+  const live = liveVoiceConfig(config);
+  if (live.model !== config.model || live.voice !== config.voice) {
+    setConfig({ model: live.model, voice: live.voice });
+    config = getConfig();
+  }
   const play = playbackStatus();
+  const hasOpenRouterKey = hasApiKey("openrouter");
+  const voiceGroups = hasOpenRouterKey ? await loadVoiceGroups() : [];
+  if (hasOpenRouterKey) writeVoiceCatalog(voiceGroups);
   return {
     ...play,
     voice: config.voice,
-    engine: resolveEngine(config),
     model: config.model,
+    voiceId: voiceKey(config.model || DEFAULT_MODEL, config.voice || DEFAULT_VOICE),
+    voiceLabel: formatVoiceChoice(config.model || DEFAULT_MODEL, config.voice || DEFAULT_VOICE),
+    speed: config.speed,
+    speeds: speedChoices(),
+    engine: resolveEngine(config),
     lastDigest: state.lastDigest || "",
     lastSpokenAt: state.lastSpokenAt,
-    voices: VOICES,
+    voiceGroups,
     hotkeys: config.hotkeys,
     hotkeyLabels: formatHotkeys(config.hotkeys),
-    hasOpenRouterKey: hasApiKey("openrouter"),
+    queueCount: queueCount(),
+    queue: listQueue().map((it) => ({ preview: it.preview || it.text })),
+    hasOpenRouterKey,
   };
 }
 
@@ -102,7 +119,7 @@ async function playText(text) {
 
 async function handleApi(req, res, url) {
   if (req.method === "GET" && url.pathname === "/api/state") {
-    return json(res, 200, snapshot());
+    return json(res, 200, await snapshot());
   }
 
   if (req.method !== "POST") return json(res, 404, { error: "not found" });
@@ -110,15 +127,24 @@ async function handleApi(req, res, url) {
   if (body.__tooLarge) return json(res, 413, { error: "too large" });
 
   if (url.pathname === "/api/voice") {
-    const voice = String(body.voice || "").toLowerCase();
-    if (!VOICES.some((v) => v.id === voice)) return json(res, 400, { error: "unknown voice" });
-    setConfig({ voice });
-    return json(res, 200, snapshot());
+    if (!hasApiKey("openrouter")) return json(res, 400, { error: "add an OpenRouter key first" });
+    const parsed = parseVoiceKey(body.id || body.voice);
+    const groups = await loadVoiceGroups();
+    const id = voiceKey(parsed.model, parsed.voice);
+    const found = groups.some((g) => g.voices.some((v) => v.id === id));
+    if (!found) return json(res, 400, { error: "unknown voice" });
+    setConfig({ engine: "openrouter", model: parsed.model, voice: parsed.voice });
+    return json(res, 200, await snapshot());
+  }
+  if (url.pathname === "/api/speed") {
+    const speed = normalizeSpeed(body.speed);
+    setConfig({ speed });
+    return json(res, 200, await snapshot());
   }
   if (url.pathname === "/api/key") {
     if (body.clear) {
       clearApiKey("openrouter");
-      return json(res, 200, snapshot());
+      return json(res, 200, await snapshot());
     }
     const key = String(body.key || "").trim();
     if (key.length < 8) return json(res, 400, { error: "paste your OpenRouter key" });
@@ -128,7 +154,7 @@ async function handleApi(req, res, url) {
       model: getConfig().model || "x-ai/grok-voice-tts-1.0",
       voice: getConfig().voice || "eve",
     });
-    const out = snapshot();
+    const out = await snapshot();
     if (JSON.stringify(out).includes(key)) {
       return json(res, 500, { error: "key leaked" });
     }
@@ -137,24 +163,29 @@ async function handleApi(req, res, url) {
   if (url.pathname === "/api/hotkeys") {
     if (body.reset) {
       setConfig({ hotkeys: DEFAULT_HOTKEYS });
-      return json(res, 200, snapshot());
+      return json(res, 200, await snapshot());
     }
-    const current = getConfig().hotkeys;
+    const current = normalizeHotkeys(getConfig().hotkeys);
     if (body.action && body.hotkey) {
       if (!HOTKEY_ACTIONS.includes(body.action)) return json(res, 400, { error: "unknown shortcut" });
-      setConfig({ hotkeys: { ...current, [body.action]: body.hotkey } });
-      return json(res, 200, snapshot());
+      const next = { ...current, [body.action]: body.hotkey };
+      const labels = formatHotkeys(next);
+      if (hotkeyLabelsClash(labels)) {
+        return json(res, 400, { error: "Each shortcut has to be different." });
+      }
+      setConfig({ hotkeys: next });
+      return json(res, 200, await snapshot());
     }
     setConfig({ hotkeys: normalizeHotkeys(body.hotkeys) });
-    return json(res, 200, snapshot());
+    return json(res, 200, await snapshot());
   }
   if (url.pathname === "/api/toggle-pause") {
-    togglePause();
-    return json(res, 200, snapshot());
+    togglePlayback();
+    return json(res, 200, await snapshot());
   }
   if (url.pathname === "/api/pause") {
     pauseCurrent();
-    return json(res, 200, snapshot());
+    return json(res, 200, await snapshot());
   }
   if (url.pathname === "/api/resume") {
     const r = resumeCurrent();
@@ -162,29 +193,32 @@ async function handleApi(req, res, url) {
       const s = getState();
       if (s.lastDigest) await playText(s.lastDigest);
     }
-    return json(res, 200, snapshot());
+    return json(res, 200, await snapshot());
+  }
+  if (url.pathname === "/api/skip") {
+    skipCurrent();
+    return json(res, 200, await snapshot());
   }
   if (url.pathname === "/api/stop") {
-    cancelFollow();
-    stopCurrent();
-    return json(res, 200, snapshot());
+    stopAll();
+    return json(res, 200, await snapshot());
   }
   if (url.pathname === "/api/grab") {
     const mode = String(body.mode || "auto");
     const r = await playGrab(mode);
-    return json(res, r.ok ? 200 : 400, { ...snapshot(), grab: r });
+    return json(res, r.ok ? 200 : 400, { ...await snapshot(), grab: r });
   }
   if (url.pathname === "/api/replay") {
     const s = getState();
-    if (!s.lastDigest) return json(res, 200, { ...snapshot(), skipped: true });
+    if (!s.lastDigest) return json(res, 200, { ...await snapshot(), skipped: true });
     await playText(s.lastDigest);
-    return json(res, 200, snapshot());
+    return json(res, 200, await snapshot());
   }
   if (url.pathname === "/api/play") {
     const text = typeof body.text === "string" ? body.text : "";
     if (!text.trim()) return json(res, 400, { error: "nothing to play" });
     await playText(text);
-    return json(res, 200, snapshot());
+    return json(res, 200, await snapshot());
   }
 
   return json(res, 404, { error: "not found" });
@@ -231,6 +265,10 @@ export function startUiServer({ openBrowser = true } = {}) {
       const url = `http://${HOST}:${PORT}`;
       mkdirSync(paths.CODA_DIR, { recursive: true });
       writeFileSync(join(paths.CODA_DIR, "ui.port"), String(PORT) + "\n");
+      writeQueueBadge();
+      if (hasApiKey("openrouter")) {
+        loadVoiceGroups().then(writeVoiceCatalog).catch(() => {});
+      }
       if (openBrowser) openSettings(url);
       resolve({ server, url, port: PORT });
     });

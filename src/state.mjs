@@ -8,6 +8,7 @@ import {
   existsSync,
 } from "node:fs";
 import { DEFAULT_HOTKEYS, normalizeHotkeys } from "./hotkeys.mjs";
+import { normalizeSpeed } from "./speed.mjs";
 
 const CODA_DIR = process.env.CODA_HOME || join(homedir(), ".coda");
 const STATE_PATH = join(CODA_DIR, "state.json");
@@ -25,6 +26,10 @@ const DEFAULT_STATE = {
   blocks: [],
   blockIndex: 0,
   follow: false,
+  speakQueue: [],
+  queueSkipAt: 0,
+  queueStopAt: 0,
+  queueRunning: false,
 };
 
 const DEFAULT_CONFIG = {
@@ -71,7 +76,12 @@ export function getConfig() {
   // env overrides file for a couple of common knobs
   if (process.env.CODA_ENGINE) fromFile.engine = process.env.CODA_ENGINE;
   if (process.env.CODA_VOICE) fromFile.voice = process.env.CODA_VOICE;
-  fromFile.hotkeys = normalizeHotkeys(fromFile.hotkeys);
+  const nextHotkeys = normalizeHotkeys(fromFile.hotkeys);
+  const nextSpeed = normalizeSpeed(fromFile.speed);
+  const changed = JSON.stringify(fromFile.hotkeys) !== JSON.stringify(nextHotkeys) || fromFile.speed !== nextSpeed;
+  fromFile.hotkeys = nextHotkeys;
+  fromFile.speed = nextSpeed;
+  if (changed) writeJson(CONFIG_PATH, fromFile);
   return fromFile;
 }
 
@@ -82,6 +92,7 @@ export function setConfig(patch) {
   } else {
     next.hotkeys = normalizeHotkeys(next.hotkeys);
   }
+  next.speed = normalizeSpeed(next.speed);
   writeJson(CONFIG_PATH, next);
   return next;
 }
@@ -114,6 +125,8 @@ export const paths = {
   STATE_PATH,
   CONFIG_PATH,
   PLAYBACK_PATH: join(CODA_DIR, "playback.json"),
+  QUEUE_PATH: join(CODA_DIR, "queue.json"),
+  VOICES_PATH: join(CODA_DIR, "voices.json"),
   GRAB_CMD_PATH: join(CODA_DIR, "grab-cmd.json"),
   LAST_GRAB_PATH: join(CODA_DIR, "last-grab.json"),
 };

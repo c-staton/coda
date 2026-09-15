@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Arrow cluster: Control-Option-Down queues the highlight. Control-Option-Left plays or pauses. Control-Option-Right skips.
+- Speed is in the menu and in settings. It changes the clip that is playing.
+- The menu bar shows how many clips are waiting. The next clip is prepared while this one plays.
+
 ## 0.1.2
 
 - Keep Accessibility across `./install`. Sign with a stable identity and do not delete Coda.app.

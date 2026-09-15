@@ -4,7 +4,7 @@
 
 # Coda
 
-A Mac app. Highlight text in any app. Press **Control-Option-X**. Coda reads it out loud.
+A Mac app. Highlight text in any app. Press **Control-Option-Down**. Coda reads it out loud. Press Down again while it is talking and the next bit waits in line.
 
 It does not run on Windows or Linux.
 
@@ -24,11 +24,11 @@ cd coda
 ./install
 ```
 
-Then highlight some text and press Control-Option-X.
+Then highlight some text and press Control-Option-Down. Press Down again to put the next bit in line.
 
 ## Better voice
 
-Open **Coda** from the menu bar. Paste your [OpenRouter key](https://openrouter.ai/keys). Pick Eve, Ara, Rex, Leo, or Sal.
+Open **Coda** from the menu bar. Paste your [OpenRouter key](https://openrouter.ai/keys). Then pick a voice. Voices are grouped by OpenRouter model.
 
 The key stays on this Mac in `~/.coda/secrets.json`. It never goes in git.
 
@@ -36,12 +36,18 @@ Without a key, Coda uses your Mac’s built-in voice.
 
 ## Use
 
+Highlight text. **Control-Option-Down** reads it. If Coda is already talking, that new text waits in line. Clips play in the order you added them. While one plays, Coda gets the next one ready so it can start right away.
+
+The menu bar shows how many are waiting.
+
 | | |
 | --- | --- |
-| **Control-Option-X** | Play the highlight. Same text pauses or resumes. New text replaces what’s playing. |
-| **Coda menu** | Play / pause, stop, pick a voice, open settings |
+| **Control-Option-Down** | Read this, or put it next in line |
+| **Control-Option-Left** | Play or pause |
+| **Control-Option-Right** | Skip this one. Play the next in line. |
+| **Coda menu** | Queue, play / pause, skip, stop, pick a voice, open settings |
 
-The smiley blinks while the voice is loading.
+The smiley goes dark while the voice is loading.
 
 ## What you hear
 

@@ -31,11 +31,25 @@ struct HotkeyConfig: Codable, Equatable {
 }
 
 struct BoundHotkeys: Codable, Equatable {
+  var queue: HotkeyConfig
   var play: HotkeyConfig
+  var skip: HotkeyConfig
 }
 
 func defaultHotkeys() -> BoundHotkeys {
-  BoundHotkeys(play: HotkeyConfig(key: "x", mods: ["control", "option"]))
+  BoundHotkeys(
+    queue: HotkeyConfig(key: "down", mods: ["control", "option"]),
+    play: HotkeyConfig(key: "left", mods: ["control", "option"]),
+    skip: HotkeyConfig(key: "right", mods: ["control", "option"])
+  )
+}
+
+func sameHotkey(_ a: HotkeyConfig, _ b: HotkeyConfig) -> Bool {
+  a.key.lowercased() == b.key.lowercased() && a.mods.map { $0.lowercased() } == b.mods.map { $0.lowercased() }
+}
+
+func isLegacyStock(_ hk: HotkeyConfig?, old: HotkeyConfig) -> Bool {
+  hk == nil || sameHotkey(hk!, old)
 }
 
 func keyCode(for letter: String) -> UInt32? {
@@ -76,6 +90,10 @@ func keyCode(for letter: String) -> UInt32? {
   case "7": return UInt32(kVK_ANSI_7)
   case "8": return UInt32(kVK_ANSI_8)
   case "9": return UInt32(kVK_ANSI_9)
+  case "right": return UInt32(kVK_RightArrow)
+  case "left": return UInt32(kVK_LeftArrow)
+  case "up": return UInt32(kVK_UpArrow)
+  case "down": return UInt32(kVK_DownArrow)
   default: return nil
   }
 }
@@ -101,7 +119,13 @@ func formatHotkey(_ hk: HotkeyConfig) -> String {
   if mods.contains("option") || mods.contains("alt") { parts.append("⌥") }
   if mods.contains("shift") { parts.append("⇧") }
   if mods.contains("command") || mods.contains("cmd") || mods.contains("meta") { parts.append("⌘") }
-  parts.append(hk.key.uppercased())
+  switch hk.key.lowercased() {
+  case "right": parts.append("→")
+  case "left": parts.append("←")
+  case "up": parts.append("↑")
+  case "down": parts.append("↓")
+  default: parts.append(hk.key.uppercased())
+  }
   return parts.joined()
 }
 
@@ -114,13 +138,75 @@ func parseHotkey(_ raw: Any?) -> HotkeyConfig? {
   return HotkeyConfig(key: key, mods: mods)
 }
 
-let voices: [(id: String, label: String)] = [
-  ("eve", "Eve"),
-  ("ara", "Ara"),
-  ("rex", "Rex"),
-  ("leo", "Leo"),
-  ("sal", "Sal"),
-]
+struct VoiceChoice: Codable {
+  var id: String
+  var voice: String
+  var label: String
+}
+
+struct VoiceGroup: Codable {
+  var model: String
+  var company: String?
+  var voices: [VoiceChoice]
+
+  var title: String { company ?? companyLabel(model) }
+}
+
+struct VoiceCatalog: Codable {
+  var groups: [VoiceGroup]
+}
+
+func defaultVoiceGroups() -> [VoiceGroup] {
+  let grok = ["eve", "ara", "rex", "leo", "sal"]
+  let gemini = ["Kore", "Puck", "Charon", "Zephyr", "Aoede", "Fenrir"]
+  return [
+    VoiceGroup(
+      model: "x-ai/grok-voice-tts-1.0",
+      company: "xai",
+      voices: grok.map { VoiceChoice(id: "x-ai/grok-voice-tts-1.0::\($0)", voice: $0, label: $0) }
+    ),
+    VoiceGroup(
+      model: "google/gemini-3.1-flash-tts-preview",
+      company: "google",
+      voices: gemini.map { VoiceChoice(id: "google/gemini-3.1-flash-tts-preview::\($0)", voice: $0, label: $0) }
+    )
+  ]
+}
+
+func loadVoiceGroups() -> [VoiceGroup] {
+  let url = URL(fileURLWithPath: codaHome + "/voices.json")
+  guard let data = try? Data(contentsOf: url),
+        let cat = try? JSONDecoder().decode(VoiceCatalog.self, from: data),
+        !cat.groups.isEmpty else {
+    return defaultVoiceGroups()
+  }
+  return cat.groups
+}
+
+func hasOpenRouterKey() -> Bool {
+  let url = URL(fileURLWithPath: codaHome + "/secrets.json")
+  guard let data = try? Data(contentsOf: url),
+        let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+        let key = obj["OPENROUTER_API_KEY"] as? String else {
+    return false
+  }
+  return !key.isEmpty
+}
+
+func loadModel() -> String {
+  let url = URL(fileURLWithPath: codaHome + "/config.json")
+  guard let data = try? Data(contentsOf: url),
+        let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+        let model = obj["model"] as? String,
+        !model.isEmpty else {
+    return "x-ai/grok-voice-tts-1.0"
+  }
+  return model
+}
+
+func currentVoiceId() -> String {
+  "\(loadModel())::\(loadVoice())"
+}
 
 struct InstallPaths: Codable {
   var node: String
@@ -142,6 +228,37 @@ func loadInstallPaths() -> (node: String, cli: String)? {
   return (rec.node, rec.cli)
 }
 
+let speedChoices: [Float] = [0.75, 1, 1.25, 1.5, 1.75, 2]
+
+func formatSpeed(_ rate: Float) -> String {
+  if abs(rate - 1) < 0.01 { return "1×" }
+  let rounded = (rate * 100).rounded() / 100
+  if rounded == rounded.rounded() { return "\(Int(rounded))×" }
+  return String(format: "%g×", rounded)
+}
+
+func loadSpeed() -> Float {
+  let url = URL(fileURLWithPath: codaHome + "/config.json")
+  guard let data = try? Data(contentsOf: url),
+        let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+    return 1
+  }
+  let raw: Double
+  if let n = obj["speed"] as? Double { raw = n }
+  else if let n = obj["speed"] as? Int { raw = Double(n) }
+  else { return 1 }
+  var best: Float = 1
+  var dist = Double.infinity
+  for s in speedChoices {
+    let d = abs(Double(s) - raw)
+    if d < dist {
+      best = s
+      dist = d
+    }
+  }
+  return best
+}
+
 func loadVoice() -> String {
   let url = URL(fileURLWithPath: codaHome + "/config.json")
   guard let data = try? Data(contentsOf: url),
@@ -150,11 +267,26 @@ func loadVoice() -> String {
         !voice.isEmpty else {
     return "eve"
   }
-  return voice.lowercased()
+  return voice
+}
+
+func companyLabel(_ model: String) -> String {
+  if model.hasPrefix("x-ai/") { return "xai" }
+  if model.hasPrefix("openai/") { return "openai" }
+  if model.hasPrefix("google/") { return "google" }
+  if let slash = model.firstIndex(of: "/") {
+    return String(model[..<slash])
+  }
+  return model
 }
 
 func voiceLabel(_ id: String) -> String {
-  voices.first(where: { $0.id == id })?.label ?? id.capitalized
+  if let range = id.range(of: "::") {
+    let model = String(id[..<range.lowerBound])
+    let voice = String(id[range.upperBound...])
+    return "\(voice) · \(companyLabel(model))"
+  }
+  return id
 }
 
 func loadHotkeys() -> BoundHotkeys {
@@ -165,7 +297,29 @@ func loadHotkeys() -> BoundHotkeys {
         let raw = obj["hotkeys"] as? [String: Any] else {
     return defaults
   }
-  return BoundHotkeys(play: parseHotkey(raw["play"]) ?? defaults.play)
+  let play = parseHotkey(raw["play"])
+  let queue = parseHotkey(raw["queue"]) ?? parseHotkey(raw["pause"])
+  let skip = parseHotkey(raw["skip"])
+  let oldPlay = HotkeyConfig(key: "x", mods: ["control", "option"])
+  let oldPause = HotkeyConfig(key: "p", mods: ["control", "option"])
+  let oldSkip = HotkeyConfig(key: "right", mods: ["control", "option"])
+  let prevQueue = HotkeyConfig(key: "left", mods: ["control", "option"])
+  let prevPlay = HotkeyConfig(key: "down", mods: ["control", "option"])
+  if (play != nil || queue != nil || skip != nil),
+     isLegacyStock(play, old: oldPlay),
+     isLegacyStock(queue, old: oldPause),
+     isLegacyStock(skip, old: oldSkip) {
+    return defaults
+  }
+  if let queue, let play, sameHotkey(queue, prevQueue), sameHotkey(play, prevPlay),
+     isLegacyStock(skip, old: oldSkip) {
+    return defaults
+  }
+  return BoundHotkeys(
+    queue: queue ?? defaults.queue,
+    play: play ?? defaults.play,
+    skip: skip ?? defaults.skip
+  )
 }
 
 func eventMatches(_ event: NSEvent, _ hk: HotkeyConfig) -> Bool {
@@ -185,7 +339,9 @@ func eventMatches(_ event: NSEvent, _ hk: HotkeyConfig) -> Bool {
 
 func hotkeyAction(for event: NSEvent) -> String? {
   let keys = App.shared?.currentHotkeys ?? defaultHotkeys()
+  if eventMatches(event, keys.queue) { return "queue" }
   if eventMatches(event, keys.play) { return "play" }
+  if eventMatches(event, keys.skip) { return "skip" }
   return nil
 }
 
@@ -196,7 +352,12 @@ let lastGrabPath = codaHome + "/last-grab.json"
 let playbackPath = codaHome + "/playback.json"
 let playerCmdPath = codaHome + "/player-cmd.json"
 let grabCmdPath = codaHome + "/grab-cmd.json"
+let queuePath = codaHome + "/queue.json"
 let hotkeyPressPath = codaHome + "/hotkey-press.json"
+
+struct QueueInfo: Codable {
+  var count: Int
+}
 
 struct GrabCmd: Codable {
   var id: Double
@@ -246,6 +407,17 @@ func sendPlayerCommand(action: String, file: String) {
 final class Sound: NSObject, AVAudioPlayerDelegate {
   var player: AVAudioPlayer?
   var file = ""
+  var rate: Float = 1
+
+  func applyRate() {
+    player?.enableRate = true
+    player?.rate = rate
+  }
+
+  func setRate(_ value: Float) {
+    rate = value
+    applyRate()
+  }
 
   func play(path: String) {
     stop()
@@ -257,6 +429,8 @@ final class Sound: NSObject, AVAudioPlayerDelegate {
       return
     }
     player?.delegate = self
+    player?.enableRate = true
+    player?.rate = rate
     player?.prepareToPlay()
     player?.play()
     file = path
@@ -264,14 +438,14 @@ final class Sound: NSObject, AVAudioPlayerDelegate {
   }
 
   func pause() {
-    guard let player, player.isPlaying else { return }
-    player.pause()
+    guard let player else { return }
+    if player.isPlaying { player.pause() }
     writePlayback(playing: false, paused: true, file: file)
   }
 
   func resumePlay() {
-    guard let player, !player.isPlaying else { return }
-    player.play()
+    guard let player else { return }
+    if !player.isPlaying { player.play() }
     writePlayback(playing: true, paused: false, file: file)
   }
 
@@ -546,7 +720,13 @@ func codaHotKeyCallback(
     &id
   )
   DispatchQueue.main.async {
-    App.shared?.speakHighlight()
+    if id.id == 1 {
+      App.shared?.togglePauseAudio()
+    } else if id.id == 3 {
+      App.shared?.skipHighlight()
+    } else {
+      App.shared?.speakHighlight()
+    }
   }
   return noErr
 }
@@ -648,16 +828,20 @@ final class App: NSObject, NSApplicationDelegate {
   var localHotkeyMonitor: Any?
   var cacheWork: DispatchWorkItem?
   var lastSpeakAt: TimeInterval = 0
+  var lastPauseAt: TimeInterval = 0
+  var lastSkipAt: TimeInterval = 0
+  var lastQueueCount = -1
   var currentHotkeys = defaultHotkeys()
   var carbonRefs: [EventHotKeyRef] = []
   var configTimer: Timer?
   var lastHotkeySig = ""
-  var lastVoice = ""
+  var lastVoiceId = ""
+  var lastVoiceStamp = ""
+  var lastSpeed: Float = 1
   var lastPlayerCmdId: Double = 0
   var lastGrabCmdId: Double = 0
   var lastAccessNudge: TimeInterval = 0
   var busy = false
-  var busyTimer: Timer?
   let sound = Sound()
   var node = "/usr/bin/env"
   var cli = ""
@@ -677,6 +861,8 @@ final class App: NSObject, NSApplicationDelegate {
     adoptExistingPlayerCmd()
     adoptExistingGrabCmd()
     writePlayback(playing: false, paused: false)
+    lastSpeed = loadSpeed()
+    sound.setRate(lastSpeed)
     item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
     item.button?.image = codaMenuImage()
     item.button?.imagePosition = .imageOnly
@@ -722,15 +908,6 @@ final class App: NSObject, NSApplicationDelegate {
     notify("Coda", "Remove Coda in Accessibility, add Coda.app again, turn it on, then quit Coda and open it.")
   }
 
-  func pulseIcon() {
-    guard let button = item?.button else { return }
-    button.alphaValue = 0.2
-    DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) { [weak self] in
-      if self?.busy == true { return }
-      self?.item.button?.animator().alphaValue = 1
-    }
-  }
-
   func adoptExistingPlayerCmd() {
     guard let data = try? Data(contentsOf: URL(fileURLWithPath: playerCmdPath)),
           let cmd = try? JSONDecoder().decode(PlayerCmd.self, from: data) else { return }
@@ -759,24 +936,37 @@ final class App: NSObject, NSApplicationDelegate {
     _ = grabHighlight()
   }
 
+  func audioIsPlaying() -> Bool {
+    sound.player?.isPlaying == true
+  }
+
+  func audioIsPaused() -> Bool {
+    guard let player = sound.player else { return false }
+    return !player.isPlaying && !sound.file.isEmpty
+  }
+
+  func flashIcon() {
+    item.button?.alphaValue = 0.22
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) { [weak self] in
+      if self?.busy == true { return }
+      self?.item.button?.alphaValue = 1
+    }
+  }
+
+  func showBusy() {
+    busy = true
+    item.button?.alphaValue = 0.22
+    item.button?.toolTip = "Getting the voice…"
+  }
+
   func startBusy() {
     writePlayback(playing: false, paused: false, loading: true)
-    item.button?.toolTip = "Getting the voice…"
-    if busy { return }
-    busy = true
-    busyTimer?.invalidate()
-    var dim = false
-    busyTimer = Timer.scheduledTimer(withTimeInterval: 0.38, repeats: true) { [weak self] _ in
-      dim.toggle()
-      self?.item.button?.animator().alphaValue = dim ? 0.25 : 1
-    }
+    showBusy()
   }
 
   func stopBusy() {
     busy = false
-    busyTimer?.invalidate()
-    busyTimer = nil
-    item.button?.animator().alphaValue = 1
+    item.button?.alphaValue = 1
     item.button?.toolTip = "Coda"
   }
 
@@ -834,28 +1024,63 @@ final class App: NSObject, NSApplicationDelegate {
     DispatchQueue.main.asyncAfter(deadline: .now() + 0.16, execute: work)
   }
 
+  func voicesStamp() -> String {
+    let keyed = hasOpenRouterKey() ? "1" : "0"
+    let path = codaHome + "/voices.json"
+    var mtime = 0.0
+    if let attrs = try? FileManager.default.attributesOfItem(atPath: path),
+       let date = attrs[.modificationDate] as? Date {
+      mtime = date.timeIntervalSince1970
+    }
+    return "\(keyed)|\(mtime)|\(currentVoiceId())|\(loadSpeed())"
+  }
+
   func rebuildMenu() {
-    lastVoice = loadVoice()
+    lastVoiceId = currentVoiceId()
+    lastSpeed = loadSpeed()
+    lastVoiceStamp = voicesStamp()
+    sound.setRate(lastSpeed)
     let menu = NSMenu()
     menu.addItem(withTitle: "Open Coda", action: #selector(openSettings), keyEquivalent: "o")
     menu.addItem(NSMenuItem.separator())
+    menu.addItem(withTitle: "Queue  (\(formatHotkey(currentHotkeys.queue)))", action: #selector(queueSelection), keyEquivalent: "")
     menu.addItem(withTitle: "Play / pause  (\(formatHotkey(currentHotkeys.play)))", action: #selector(playSelection), keyEquivalent: "")
+    menu.addItem(withTitle: "Skip  (\(formatHotkey(currentHotkeys.skip)))", action: #selector(skipSelection), keyEquivalent: "")
     menu.addItem(withTitle: "Stop", action: #selector(stop), keyEquivalent: ".")
     if !AXIsProcessTrusted() {
       menu.addItem(withTitle: "Turn on Accessibility…", action: #selector(showAccess), keyEquivalent: "")
     }
     menu.addItem(NSMenuItem.separator())
-    let voiceMenu = NSMenu()
-    for voice in voices {
-      let voiceItem = NSMenuItem(title: voice.label, action: #selector(pickVoice(_:)), keyEquivalent: "")
-      voiceItem.target = self
-      voiceItem.representedObject = voice.id
-      voiceItem.state = voice.id == lastVoice ? .on : .off
-      voiceMenu.addItem(voiceItem)
+    if hasOpenRouterKey() {
+      let voiceMenu = NSMenu()
+      for group in loadVoiceGroups() {
+        let sub = NSMenu()
+        for choice in group.voices {
+          let voiceItem = NSMenuItem(title: choice.label, action: #selector(pickVoice(_:)), keyEquivalent: "")
+          voiceItem.target = self
+          voiceItem.representedObject = choice.id
+          voiceItem.state = choice.id == lastVoiceId ? .on : .off
+          sub.addItem(voiceItem)
+        }
+        let groupItem = NSMenuItem(title: group.title, action: nil, keyEquivalent: "")
+        groupItem.submenu = sub
+        voiceMenu.addItem(groupItem)
+      }
+      let voiceParent = NSMenuItem(title: "Voice  \(voiceLabel(lastVoiceId))", action: nil, keyEquivalent: "")
+      voiceParent.submenu = voiceMenu
+      menu.addItem(voiceParent)
     }
-    let voiceParent = NSMenuItem(title: "Voice  \(voiceLabel(lastVoice))", action: nil, keyEquivalent: "")
-    voiceParent.submenu = voiceMenu
-    menu.addItem(voiceParent)
+    let speedMenu = NSMenu()
+    for rate in speedChoices {
+      let speedItem = NSMenuItem(title: formatSpeed(rate), action: #selector(pickSpeed(_:)), keyEquivalent: "")
+      speedItem.target = self
+      speedItem.representedObject = rate
+      speedItem.state = abs(rate - lastSpeed) < 0.01 ? .on : .off
+      speedMenu.addItem(speedItem)
+    }
+    let speedParent = NSMenuItem(title: "Speed  \(formatSpeed(lastSpeed))", action: nil, keyEquivalent: "")
+    speedParent.submenu = speedMenu
+    menu.addItem(speedParent)
     menu.addItem(NSMenuItem.separator())
     menu.addItem(withTitle: "Quit Coda", action: #selector(quit), keyEquivalent: "q")
     item.menu = menu
@@ -898,14 +1123,63 @@ final class App: NSObject, NSApplicationDelegate {
     try? task.run()
   }
 
+  func togglePauseAudio() {
+    let now = Date().timeIntervalSince1970
+    if now - lastPauseAt < 0.3 { return }
+    lastPauseAt = now
+    flashIcon()
+    if audioIsPlaying() {
+      sound.pause()
+      return
+    }
+    if audioIsPaused() {
+      sound.resumePlay()
+      return
+    }
+    runCoda(["toggle-pause"])
+  }
+
+  func applyQueueCount(_ n: Int) {
+    if n == lastQueueCount { return }
+    lastQueueCount = n
+    if n > 0 {
+      item.length = NSStatusItem.variableLength
+      item.button?.imagePosition = .imageLeft
+      item.button?.title = "\(n)"
+    } else {
+      item.length = NSStatusItem.squareLength
+      item.button?.imagePosition = .imageOnly
+      item.button?.title = ""
+    }
+  }
+
+  func pollQueue() {
+    guard let data = try? Data(contentsOf: URL(fileURLWithPath: queuePath)),
+          let info = try? JSONDecoder().decode(QueueInfo.self, from: data) else {
+      applyQueueCount(0)
+      return
+    }
+    applyQueueCount(max(0, info.count))
+  }
+
+  func skipHighlight() {
+    let now = Date().timeIntervalSince1970
+    if now - lastSkipAt < 0.3 { return }
+    lastSkipAt = now
+    flashIcon()
+    runCoda(["skip"])
+  }
+
   func speakHighlight() {
     let now = Date().timeIntervalSince1970
     if now - lastSpeakAt < 0.5 { return }
     lastSpeakAt = now
-    pulseIcon()
     writeJson(HotkeyPress(at: now, trusted: AXIsProcessTrusted()), to: hotkeyPressPath)
+    let occupied = audioIsPlaying() || audioIsPaused() || busy
+    if occupied { flashIcon() } else { showBusy() }
     refreshTrust()
     if !AXIsProcessTrusted() {
+      stopBusy()
       nudgeAccess()
       return
     }
@@ -913,11 +1187,16 @@ final class App: NSObject, NSApplicationDelegate {
     guard grab.ok,
           let data = try? JSONEncoder().encode(grab),
           let raw = String(data: data, encoding: .utf8) else {
+      stopBusy()
       notify("Coda", grab.note)
       return
     }
     DispatchQueue.global(qos: .userInitiated).async { [weak self] in
       self?.runCoda(["play-selection"], stdin: raw, wait: true)
+      DispatchQueue.main.async {
+        guard let self, self.busy, self.sound.player?.isPlaying != true else { return }
+        self.stopBusy()
+      }
     }
   }
 
@@ -940,30 +1219,44 @@ final class App: NSObject, NSApplicationDelegate {
     Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in
       self?.pollPlayerCmd()
       self?.pollGrabCmd()
+      self?.pollQueue()
     }
   }
 
   func handleHotkey(_ event: NSEvent) -> Bool {
-    if hotkeyAction(for: event) == "play" {
+    let action = hotkeyAction(for: event)
+    if action == "queue" {
       speakHighlight()
+      return true
+    }
+    if action == "play" {
+      togglePauseAudio()
+      return true
+    }
+    if action == "skip" {
+      skipHighlight()
       return true
     }
     return false
   }
 
   func hotkeySig(_ keys: BoundHotkeys) -> String {
-    "\(keys.play.mods.joined(separator: "+"))+\(keys.play.key)"
+    "\(keys.queue.mods.joined(separator: "+"))+\(keys.queue.key)/\(keys.play.mods.joined(separator: "+"))+\(keys.play.key)/\(keys.skip.mods.joined(separator: "+"))+\(keys.skip.key)"
   }
 
   func reloadHotkeysIfNeeded() {
     let next = loadHotkeys()
     let sig = hotkeySig(next)
-    let voice = loadVoice()
+    let stamp = voicesStamp()
     if sig != lastHotkeySig {
       applyHotkeys(next)
       return
     }
-    if voice != lastVoice, item != nil {
+    if stamp != lastVoiceStamp, item != nil {
+      lastVoiceStamp = stamp
+      lastVoiceId = currentVoiceId()
+      lastSpeed = loadSpeed()
+      sound.setRate(lastSpeed)
       rebuildMenu()
     }
   }
@@ -991,12 +1284,21 @@ final class App: NSObject, NSApplicationDelegate {
     }
     carbonRefs.removeAll()
     let playStatus = registerCarbon(currentHotkeys.play, id: 1)
+    let queueStatus = registerCarbon(currentHotkeys.queue, id: 2)
+    let skipStatus = registerCarbon(currentHotkeys.skip, id: 3)
     struct HotkeyInfo: Codable {
       var carbon: Int
+      var queue: String
       var play: String
+      var skip: String
     }
     writeJson(
-      HotkeyInfo(carbon: playStatus, play: formatHotkey(currentHotkeys.play)),
+      HotkeyInfo(
+        carbon: playStatus + queueStatus + skipStatus,
+        queue: formatHotkey(currentHotkeys.queue),
+        play: formatHotkey(currentHotkeys.play),
+        skip: formatHotkey(currentHotkeys.skip)
+      ),
       to: codaHome + "/hotkey.json"
     )
     if item != nil { rebuildMenu() }
@@ -1007,12 +1309,21 @@ final class App: NSObject, NSApplicationDelegate {
     NSWorkspace.shared.open(settingsURL)
   }
   @objc func showAccess() { nudgeAccess() }
-  @objc func playSelection() { speakHighlight() }
+  @objc func queueSelection() { speakHighlight() }
+  @objc func playSelection() { togglePauseAudio() }
+  @objc func skipSelection() { skipHighlight() }
   @objc func stop() { runCoda(["stop"]) }
   @objc func pickVoice(_ sender: NSMenuItem) {
     guard let id = sender.representedObject as? String else { return }
     runCoda(["voice", id], wait: true)
-    lastVoice = id
+    lastVoiceId = id
+    rebuildMenu()
+  }
+  @objc func pickSpeed(_ sender: NSMenuItem) {
+    guard let rate = sender.representedObject as? Float else { return }
+    lastSpeed = rate
+    sound.setRate(rate)
+    runCoda(["speed", formatSpeed(rate).replacingOccurrences(of: "×", with: "")], wait: true)
     rebuildMenu()
   }
   @objc func quit() { NSApp.terminate(nil) }

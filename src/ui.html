@@ -52,10 +52,7 @@
       filter: invert(1);
     }
     .mark.busy img {
-      animation: coda-pulse 0.7s ease-in-out infinite;
-    }
-    @keyframes coda-pulse {
-      50% { opacity: 0.28; }
+      opacity: 0.22;
     }
     h1 {
       margin: 0;
@@ -78,14 +75,11 @@
     }
     .label { color: var(--fg); }
     .hint { color: var(--muted); }
-    .now {
-      margin: 0;
-      color: var(--muted);
-      display: -webkit-box;
-      -webkit-line-clamp: 3;
-      -webkit-box-orient: vertical;
-      overflow: hidden;
+    .note {
+      display: block;
+      padding: 10px 0 4px;
     }
+    .note .label { padding-bottom: 2px; }
     button {
       appearance: none;
       border: 0;
@@ -102,6 +96,7 @@
       color: var(--fg);
     }
     .ghost:hover { background: var(--hover); }
+    .actions { display: flex; gap: 8px; }
     .kbd {
       border: 1px solid var(--line);
       background: var(--fill);
@@ -112,6 +107,12 @@
     }
     .kbd.recording { border-color: var(--fg); }
     .voices { display: flex; flex-wrap: wrap; gap: 6px; padding: 4px 0 12px; }
+    .model {
+      color: var(--muted);
+      font-size: 12px;
+      padding: 10px 0 2px;
+    }
+    .model:first-child { padding-top: 4px; }
     .voice {
       border: 1px solid var(--line);
       border-radius: 999px;
@@ -162,47 +163,71 @@
         </div>
         <div>
           <h1>Coda</h1>
-          <p class="sub">A Mac app. Highlight text, then play it. Long codes become “code.” Long numbers become “number.”</p>
+          <p class="sub">Highlight text. Down reads it. Down again puts the next bit in line.</p>
         </div>
       </div>
     </header>
 
     <section>
       <div class="row">
-        <div>
-          <div class="label">Now</div>
-          <p class="now" id="now">Nothing yet</p>
+        <div class="actions">
+          <button class="ghost" id="queueHighlight">Queue</button>
+          <button class="ghost" id="playHighlight">Play / pause</button>
+          <button class="ghost" id="skipHighlight">Skip</button>
         </div>
         <div class="status" id="status"></div>
       </div>
-      <div class="row">
-        <button class="ghost" id="playHighlight">Play / pause</button>
-      </div>
     </section>
 
     <section>
+      <div class="note">
+        <div class="label">The line</div>
+        <div class="hint">Clips play in order. Coda gets the next one ready while this one plays, so it can start right away. The menu bar shows how many are waiting.</div>
+      </div>
       <div class="row">
         <div>
-          <div class="label">Shortcut</div>
-          <div class="hint">Play, pause, or start a new highlight</div>
+          <div class="label">Queue</div>
+          <div class="hint">Read this now. If something is already playing, this waits next.</div>
         </div>
-        <button class="kbd" id="hotkeyPlay">Control-Option-X</button>
+        <button class="kbd" id="hotkeyQueue">Control-Option-Down</button>
+      </div>
+      <div class="row">
+        <div>
+          <div class="label">Play / pause</div>
+          <div class="hint">Pause or keep going. Does not grab new text.</div>
+        </div>
+        <button class="kbd" id="hotkeyPlay">Control-Option-Left</button>
+      </div>
+      <div class="row">
+        <div>
+          <div class="label">Skip</div>
+          <div class="hint">Drop this one. Play the next in line.</div>
+        </div>
+        <button class="kbd" id="hotkeySkip">Control-Option-Right</button>
       </div>
     </section>
 
-    <section>
+    <section id="voiceSection" hidden>
       <div class="row">
         <div class="label">Voice</div>
         <div class="hint" id="engineHint"></div>
       </div>
-      <div class="voices" id="voices"></div>
+      <div id="voices"></div>
+    </section>
+
+    <section>
+      <div class="row">
+        <div class="label">Speed</div>
+        <div class="hint" id="speedHint"></div>
+      </div>
+      <div class="voices" id="speeds"></div>
     </section>
 
     <section>
       <div class="row">
         <div>
           <div class="label">OpenRouter key</div>
-          <div class="hint" id="keyHint">Paste it here for Eve and the other voices.</div>
+          <div class="hint" id="keyHint">Paste it here to unlock OpenRouter voices.</div>
         </div>
       </div>
       <div class="key-row">
@@ -241,44 +266,83 @@
       const labels = state.hotkeyLabels || {};
       const sig = JSON.stringify({
         voice: state.voice,
-        lastDigest: state.lastDigest,
+        voiceId: state.voiceId,
+        model: state.model,
+        speed: state.speed,
         playing: state.playing,
         paused: state.paused,
         loading: state.loading,
+        queueCount: state.queueCount,
         hasOpenRouterKey: state.hasOpenRouterKey,
+        voices: (state.voiceGroups || []).map((g) => g.model + ":" + (g.voices || []).length).join(","),
         lastError,
         labels,
         recording,
       });
       if (sig === lastSig) return;
       lastSig = sig;
-      $("now").textContent = state.lastDigest || "Nothing yet";
-      $("engineHint").textContent = state.voice || "";
+      const waiting = Number(state.queueCount) || 0;
+      $("voiceSection").hidden = !state.hasOpenRouterKey;
+      $("engineHint").textContent = state.voiceLabel || "";
+      $("speedHint").textContent = state.speed === 1 ? "Normal" : (state.speed ? state.speed + "×" : "");
       $("status").className = "status" + (lastError ? " err" : "");
-      $("status").textContent = lastError || (state.loading ? "Getting the voice…" : state.paused ? "Paused" : state.playing ? "Playing" : "");
+      const bits = [];
+      if (state.loading) bits.push("Getting the voice…");
+      else if (state.paused) bits.push("Paused");
+      else if (state.playing) bits.push("Playing");
+      if (waiting) bits.push(waiting === 1 ? "1 waiting" : waiting + " waiting");
+      $("status").textContent = lastError || bits.join(" · ");
       $("brandMark").classList.toggle("busy", Boolean(state.loading));
-      $("hotkeyPlay").textContent = recording === "play" ? "Press keys…" : (labels.play || "Control-Option-X");
+      $("hotkeyQueue").textContent = recording === "queue" ? "Press keys…" : (labels.queue || "Control-Option-Down");
+      $("hotkeyQueue").classList.toggle("recording", recording === "queue");
+      $("hotkeyPlay").textContent = recording === "play" ? "Press keys…" : (labels.play || "Control-Option-Left");
       $("hotkeyPlay").classList.toggle("recording", recording === "play");
+      $("hotkeySkip").textContent = recording === "skip" ? "Press keys…" : (labels.skip || "Control-Option-Right");
+      $("hotkeySkip").classList.toggle("recording", recording === "skip");
       const box = $("voices");
       box.replaceChildren();
-      for (const v of state.voices || []) {
+      for (const g of state.voiceGroups || []) {
+        const head = document.createElement("div");
+        head.className = "model";
+        head.textContent = g.company || g.model;
+        box.appendChild(head);
+        const row = document.createElement("div");
+        row.className = "voices";
+        for (const v of g.voices || []) {
+          const btn = document.createElement("button");
+          btn.className = "voice" + (state.voiceId === v.id ? " selected" : "");
+          btn.dataset.id = v.id;
+          btn.textContent = v.label;
+          row.appendChild(btn);
+        }
+        box.appendChild(row);
+      }
+      const speeds = $("speeds");
+      speeds.replaceChildren();
+      for (const s of state.speeds || []) {
         const btn = document.createElement("button");
-        btn.className = "voice" + (state.voice === v.id ? " selected" : "");
-        btn.dataset.voice = v.id;
-        btn.textContent = v.label;
-        box.appendChild(btn);
+        btn.className = "voice" + (Number(state.speed) === Number(s.id) ? " selected" : "");
+        btn.dataset.speed = s.id;
+        btn.textContent = s.label;
+        speeds.appendChild(btn);
       }
       $("keyHint").textContent = state.hasOpenRouterKey
         ? "Saved on this Mac."
-        : "Paste it here for Eve and the other voices.";
+        : "Paste it here to unlock OpenRouter voices.";
       $("keySave").textContent = state.hasOpenRouterKey ? "Replace" : "Save";
       $("keyInput").placeholder = state.hasOpenRouterKey ? "••••••••" : "sk-or-...";
     }
 
-    $("playHighlight").onclick = () => api("/api/grab", { mode: "selection" });
+    $("queueHighlight").onclick = () => api("/api/grab", { mode: "selection" });
+    $("playHighlight").onclick = () => api("/api/toggle-pause");
+    $("skipHighlight").onclick = () => api("/api/skip");
     $("voices").onclick = (e) => {
-      const btn = e.target.closest("[data-voice]");
-      if (btn) api("/api/voice", { voice: btn.dataset.voice });
+      const btn = e.target.closest("[data-id]");
+      if (btn) api("/api/voice", { id: btn.dataset.id });
+    };
+    $("speeds").onclick = (e) => {
+      const btn = e.target.closest("[data-speed]");
+      if (btn) api("/api/speed", { speed: Number(btn.dataset.speed) });
     };
     $("keySave").onclick = () => {
       const key = $("keyInput").value.trim();
@@ -288,7 +352,9 @@
     $("keyInput").addEventListener("keydown", (e) => {
       if (e.key === "Enter") $("keySave").click();
     });
+    $("hotkeyQueue").onclick = () => { recording = "queue"; lastSig = ""; render(); };
     $("hotkeyPlay").onclick = () => { recording = "play"; lastSig = ""; render(); };
+    $("hotkeySkip").onclick = () => { recording = "skip"; lastSig = ""; render(); };
     window.addEventListener("keydown", (e) => {
       if (!recording) return;
       if (e.key === "Escape") {
@@ -302,7 +368,8 @@
       if (e.altKey) mods.push("option");
       if (e.shiftKey) mods.push("shift");
       if (e.metaKey) mods.push("command");
-      const key = e.key.length === 1 ? e.key.toLowerCase() : "";
+      const special = { ArrowRight: "right", ArrowLeft: "left", ArrowUp: "up", ArrowDown: "down" };
+      const key = e.key.length === 1 ? e.key.toLowerCase() : (special[e.key] || "");
       if (!key || !mods.length) return;
       e.preventDefault();
       const action = recording;
