@@ -259,9 +259,15 @@
       $("brandMark").classList.toggle("busy", Boolean(state.loading));
       $("hotkeyPlay").textContent = recording === "play" ? "Press keys…" : (labels.play || "Control-Option-X");
       $("hotkeyPlay").classList.toggle("recording", recording === "play");
-      $("voices").innerHTML = (state.voices || []).map((v) => `
-        <button class="voice ${state.voice === v.id ? "selected" : ""}" data-voice="${v.id}">${v.label}</button>
-      `).join("");
+      const box = $("voices");
+      box.replaceChildren();
+      for (const v of state.voices || []) {
+        const btn = document.createElement("button");
+        btn.className = "voice" + (state.voice === v.id ? " selected" : "");
+        btn.dataset.voice = v.id;
+        btn.textContent = v.label;
+        box.appendChild(btn);
+      }
       $("keyHint").textContent = state.hasOpenRouterKey
         ? "Saved on this Mac."
         : "Paste it here for Eve and the other voices.";

@@ -349,8 +349,7 @@ func writeJson<T: Encodable>(_ value: T, to path: String) {
 
 func looksLikeSecret(_ text: String) -> Bool {
   let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
-  if t.hasPrefix("sk-") || t.hasPrefix("sk-or-") { return true }
-  return false
+  return t.hasPrefix("sk-") || t.hasPrefix("sk-or-") || t.hasPrefix("sk-xai-")
 }
 
 func saveHighlight(_ text: String, app: String) {
@@ -472,6 +471,11 @@ func grabHighlight() -> Grab {
 
   let ax = axSelectedText(pid: app.processIdentifier)
   if !ax.isEmpty {
+    if looksLikeSecret(ax) {
+      let grab = Grab(ok: false, method: "selection", text: "", app: name, note: "that looks like a key. Coda will not read it.")
+      writeJson(grab, to: lastGrabPath)
+      return grab
+    }
     saveHighlight(ax, app: name)
     let grab = Grab(ok: true, method: "highlight", text: ax, app: name, note: "highlighted text")
     writeJson(grab, to: lastGrabPath)
@@ -480,6 +484,11 @@ func grabHighlight() -> Grab {
 
   let copied = copyInApp(app)
   if !copied.isEmpty {
+    if looksLikeSecret(copied) {
+      let grab = Grab(ok: false, method: "selection", text: "", app: name, note: "that looks like a key. Coda will not read it.")
+      writeJson(grab, to: lastGrabPath)
+      return grab
+    }
     saveHighlight(copied, app: name)
     let grab = Grab(ok: true, method: "copy", text: copied, app: name, note: "read the highlight via Copy")
     writeJson(grab, to: lastGrabPath)
@@ -494,7 +503,7 @@ func grabHighlight() -> Grab {
 
   let trusted = AXIsProcessTrusted()
   let note = trusted
-    ? "Highlight the text, let go of the mouse, then tap Play. Grok Bot drops the highlight when you leave the app."
+    ? "Highlight the text, let go of the mouse, then tap Play."
     : "Turn on Coda in System Settings → Privacy & Security → Accessibility, then try again."
   let grab = Grab(ok: false, method: "selection", text: "", app: name, note: note)
   writeJson(grab, to: lastGrabPath)

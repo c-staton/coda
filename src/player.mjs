@@ -4,6 +4,7 @@ import { speak, playbackStatus, stopCurrent, pauseCurrent, resumeCurrent } from 
 import { getState, setState, getConfig, rememberSpoken, rememberReply, paths } from "./state.mjs";
 import { splitBlocks } from "./digest.mjs";
 import { grabScreen } from "./grab.mjs";
+import { looksLikeSecret } from "./secret-text.mjs";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -71,6 +72,7 @@ export async function playBlocks(startIndex, { follow = false } = {}) {
 export async function playRaw(text) {
   const raw = String(text || "").trim();
   if (!raw) return { ok: false, reason: "nothing to read" };
+  if (looksLikeSecret(raw)) return { ok: false, reason: "that looks like a key. Coda will not read it." };
   cancelled = true;
   stopCurrent();
   cancelled = false;
@@ -123,19 +125,6 @@ export async function playOrToggle() {
   return { ok: false, action: "none", note: grabbed.note || "nothing to play" };
 }
 
-export async function playGrab(mode = "auto") {
+export async function playGrab() {
   return playOrToggle();
-}
-
-export async function playClipboard() {
-  const { spawnSync } = await import("node:child_process");
-  const r = spawnSync("pbpaste", { encoding: "utf8" });
-  const text = (r.stdout || "").trim();
-  if (!text) return { ok: false, reason: "clipboard is empty. copy some text first" };
-  cancelled = true;
-  stopCurrent();
-  cancelled = false;
-  await speak(text, getConfig(), { wait: false });
-  rememberSpoken(text);
-  return { ok: true, text };
 }

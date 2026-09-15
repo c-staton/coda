@@ -1,6 +1,5 @@
 // Local secrets for TTS keys. Lives in ~/.coda/secrets.json (mode 600).
-// Cursor hooks do not inherit your Terminal env, so a file is how the hook
-// finds XAI_API_KEY / OPENAI_API_KEY. Never commit this file.
+// Never commit this file.
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { paths } from "./state.mjs";

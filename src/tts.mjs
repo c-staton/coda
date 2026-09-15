@@ -1,4 +1,4 @@
-// TTS engine abstraction. Cursor-agnostic and dependency-free.
+// TTS engines. No npm deps.
 //
 // Engines:
 //   apple  -> macOS `say`
@@ -19,6 +19,7 @@ import { join } from "node:path";
 import { paths, getState, setState } from "./state.mjs";
 import { getApiKey } from "./secrets.mjs";
 import { installedCodaBin } from "./install.mjs";
+import { looksLikeSecret } from "./secret-text.mjs";
 
 function has(cmd) {
   const r = spawnSync("which", [cmd], { stdio: "ignore" });
@@ -33,7 +34,7 @@ export function resolveEngine(config) {
   if (getApiKey("openai")) return "openai";
   if (has("say")) return "apple"; // macOS fallback
   if (has("espeak-ng") || has("espeak")) return "espeak"; // Linux fallback
-  return "print"; // always works, never blocks a hook
+  return "print";
 }
 
 function firstPlayer() {
@@ -268,19 +269,15 @@ function synthOpenai(text, config) {
   );
 }
 
-/**
- * Speak (or synthesize) the given text.
- * options.dryRun: resolve engine + report, but do not synthesize or play.
- * Returns { engine, played, audioPath }.
- */
 export async function speak(text, config, options = {}) {
   const engine = resolveEngine(config);
 
   if (!text || !text.trim()) return { engine, played: false, audioPath: null };
+  if (looksLikeSecret(text)) return { engine, played: false, audioPath: null, skipped: true };
   if (options.dryRun) return { engine, played: false, audioPath: null, dryRun: true };
 
   if (engine === "print") {
-    process.stdout.write(`\u{1F50A} ${text}\n`);
+    process.stdout.write(`${text}\n`);
     return { engine, played: false, audioPath: null };
   }
 

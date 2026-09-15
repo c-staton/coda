@@ -1,12 +1,13 @@
 #!/usr/bin/env node
-// coda CLI: on | off | toggle | status | speak [text] | replay | hook
-import { digest, splitBlocks } from "./digest.mjs";
+// coda CLI: install | speak | key | ui | stop
+import { digest } from "./digest.mjs";
 import { speak, resolveEngine, pauseCurrent, resumeCurrent, stopCurrent, togglePause } from "./tts.mjs";
-import { getState, setState, getConfig, setConfig, rememberSpoken, rememberReply } from "./state.mjs";
+import { getState, getConfig, setConfig, rememberSpoken } from "./state.mjs";
 import { cancelFollow, playRaw, playGrab } from "./player.mjs";
 import { startUiServer } from "./ui-server.mjs";
 import { installAll, uninstallAll } from "./install.mjs";
 import { setApiKey, hasApiKey } from "./secrets.mjs";
+import { looksLikeSecret } from "./secret-text.mjs";
 
 function readStdin() {
   return new Promise((resolve) => {
@@ -15,7 +16,6 @@ function readStdin() {
     process.stdin.setEncoding("utf8");
     process.stdin.on("data", (c) => (data += c));
     process.stdin.on("end", () => resolve(data));
-    // Guard against a hook invoked with no piped input.
     setTimeout(() => resolve(data), 250).unref?.();
   });
 }
@@ -23,12 +23,9 @@ function readStdin() {
 function printStatus() {
   const s = getState();
   const c = getConfig();
-  const flag = s.listening ? "on" : "off";
   const engine = resolveEngine(c);
   const extra = engine === "openrouter" ? ` | model ${c.model}` : "";
-  process.stdout.write(
-    `coda: listening ${flag} | engine ${engine} | voice ${c.voice}${extra}\n`
-  );
+  process.stdout.write(`coda: engine ${engine} | voice ${c.voice}${extra}\n`);
   if (s.lastSpokenAt) {
     process.stdout.write(
       `last spoken ${s.lastSpokenAt}: "${(s.lastDigest || "").slice(0, 80)}"\n`
@@ -38,8 +35,10 @@ function printStatus() {
 
 async function speakText(text, { wait = false } = {}) {
   const c = getConfig();
+  if (looksLikeSecret(text)) return { skipped: true, secret: true };
   const spoken = digest(text, { maxChars: c.maxChars });
   if (!spoken) return { skipped: true };
+  if (looksLikeSecret(spoken)) return { skipped: true, secret: true };
   const result = await speak(spoken, c, { wait });
   rememberSpoken(spoken);
   return { ...result, spoken };
@@ -49,36 +48,10 @@ const ENGINES = ["auto", "apple", "espeak", "grok", "openai", "openrouter", "pri
 const GROK_VOICES = ["eve", "ara", "rex", "leo", "sal"];
 const KEY_KINDS = { xai: "xai", openai: "openai", openrouter: "openrouter", or: "openrouter" };
 
-async function runHook() {
-  const raw = await readStdin();
-  if (!raw.trim()) return 0;
-  let payload;
-  try {
-    payload = JSON.parse(raw);
-  } catch {
-    return 0; // malformed hook input: fail quietly, never break the agent loop
-  }
-  return 0;
-}
-
 async function main() {
   const [cmd, ...rest] = process.argv.slice(2);
 
   switch (cmd) {
-    case "on":
-      setState({ listening: true });
-      printStatus();
-      return 0;
-    case "off":
-      setState({ listening: false });
-      printStatus();
-      return 0;
-    case "toggle": {
-      const s = getState();
-      setState({ listening: !s.listening });
-      printStatus();
-      return 0;
-    }
     case "status":
     case undefined:
       printStatus();
@@ -87,7 +60,8 @@ async function main() {
       const text = rest.join(" ") || (await readStdin());
       try {
         const r = await speakText(text, { wait: true });
-        if (r.skipped) process.stdout.write("coda: nothing worth speaking (skipped)\n");
+        if (r.secret) process.stderr.write("coda: that looks like a key. Coda will not read it.\n");
+        else if (r.skipped) process.stdout.write("coda: nothing worth speaking (skipped)\n");
         else if (r.audioPath) process.stdout.write(`coda: audio -> ${r.audioPath}\n`);
         return 0;
       } catch (e) {
@@ -247,7 +221,7 @@ async function main() {
     case "install": {
       let r;
       try {
-        r = installAll({ cursor: rest.includes("--cursor") });
+        r = installAll();
       } catch (e) {
         process.stderr.write(`coda: ${e.message}\n`);
         return 1;
@@ -257,7 +231,7 @@ async function main() {
         return 1;
       }
       const engine = resolveEngine(getConfig());
-      const already = Boolean(r.app?.already || r.hook?.alreadyInstalled);
+      const already = Boolean(r.app?.already);
       process.stdout.write(
         (already ? "coda: already set up. refreshed.\n" : "coda: installed.\n") +
           `  voice: ${engine}${engine === "print" ? " (no speaker found. see the README)" : ""}\n`
@@ -275,9 +249,6 @@ async function main() {
           "\nCoda is a Mac app. It does not run on this computer.\n"
         );
       }
-      if (r.hook) {
-        process.stdout.write(`  Cursor hook: ${r.hook.path}\n`);
-      }
       return 0;
     }
     case "uninstall": {
@@ -294,17 +265,17 @@ async function main() {
         process.stdout.write("coda: nothing to remove.\n");
       } else {
         process.stdout.write("coda: uninstalled.\n");
-        if (removedApp) process.stdout.write(`  menu app: ${r.app.bin}\n`);
-        if (removedHook) process.stdout.write(`  hook: ${r.hook.path}\n`);
+        if (removedApp) process.stdout.write(`  app: ${r.app.app}\n`);
+        if (removedHook) process.stdout.write(`  old hook: ${r.hook.path}\n`);
       }
       return 0;
     }
     case "hook":
-      return runHook();
+      return 0;
     default:
       process.stderr.write(
         `coda: unknown command "${cmd}"\n` +
-          "usage: coda install|uninstall|on|off|toggle|status|engine|voice|key|speak|pause|resume|stop|ui|replay|hook\n"
+          "usage: coda install|uninstall|status|engine|voice|key|speak|pause|resume|stop|ui|replay\n"
       );
       return 1;
   }

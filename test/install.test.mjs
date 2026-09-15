@@ -50,50 +50,27 @@ test("install is idempotent", () => {
   assert.match(r2.stdout, /already set up|installed/);
 });
 
-test("install --cursor wires the hook without duplicating it", () => {
+test("install never writes a Cursor hook, even with --cursor", () => {
   const c = ctx();
   const r = run(["install", "--cursor"], c);
   assert.equal(r.status, 0, r.stderr);
-  assert.ok(existsSync(c.hooksFile));
-  const cfg = JSON.parse(readFileSync(c.hooksFile, "utf8"));
-  const cmds = cfg.hooks.afterAgentResponse.map((e) => e.command);
-  assert.equal(cmds.length, 1);
-  assert.match(cmds[0], /after-agent-response\.mjs/);
-  run(["install", "--cursor"], c);
-  const again = JSON.parse(readFileSync(c.hooksFile, "utf8"));
-  assert.equal(again.hooks.afterAgentResponse.length, 1);
+  assert.equal(existsSync(c.hooksFile), false);
 });
 
-test("install --cursor preserves existing unrelated hooks", () => {
+test("uninstall still removes an old Coda hook and keeps others", () => {
   const c = ctx();
   writeFileSync(
     c.hooksFile,
     JSON.stringify({
       version: 1,
       hooks: {
-        afterAgentResponse: [{ command: "node /other/tool.js" }],
-        beforeSubmitPrompt: [{ command: "echo hi" }],
+        afterAgentResponse: [
+          { command: "node /other/tool.js" },
+          { command: "node /tmp/after-agent-response.mjs" },
+        ],
       },
     })
   );
-  run(["install", "--cursor"], c);
-  const cfg = JSON.parse(readFileSync(c.hooksFile, "utf8"));
-  const cmds = cfg.hooks.afterAgentResponse.map((e) => e.command);
-  assert.ok(cmds.includes("node /other/tool.js"));
-  assert.ok(cmds.some((x) => /after-agent-response\.mjs/.test(x)));
-  assert.equal(cfg.hooks.beforeSubmitPrompt[0].command, "echo hi");
-});
-
-test("uninstall removes only the coda hook and keeps others", () => {
-  const c = ctx();
-  writeFileSync(
-    c.hooksFile,
-    JSON.stringify({
-      version: 1,
-      hooks: { afterAgentResponse: [{ command: "node /other/tool.js" }] },
-    })
-  );
-  run(["install", "--cursor"], c);
   const r = run(["uninstall"], c);
   assert.equal(r.status, 0);
   assert.match(r.stdout, /uninstalled/);
@@ -125,10 +102,10 @@ test("install on a non-Mac machine says Coda is a Mac app", () => {
   assert.match(r.stdout, /Coda is a Mac app/);
 });
 
-test("install --cursor refuses to clobber a malformed hooks.json", () => {
+test("install leaves a malformed hooks.json alone", () => {
   const c = ctx();
   writeFileSync(c.hooksFile, "{ not valid json");
-  const r = run(["install", "--cursor"], c);
-  assert.equal(r.status, 1);
-  assert.match(r.stderr, /not valid JSON/);
+  const r = run(["install"], c);
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(readFileSync(c.hooksFile, "utf8"), "{ not valid json");
 });

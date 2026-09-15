@@ -15,7 +15,7 @@ function runCoda(args, { input, home } = {}) {
     env: {
       ...process.env,
       CODA_HOME: home,
-      CODA_ENGINE: "print", // deterministic, no audio device needed
+      CODA_ENGINE: "print",
     },
   });
 }
@@ -24,22 +24,16 @@ function freshHome() {
   return mkdtempSync(join(tmpdir(), "coda-test-"));
 }
 
-test("status defaults to listening on", () => {
+test("status shows engine and voice", () => {
   const home = freshHome();
   const r = runCoda(["status"], { home });
   assert.equal(r.status, 0);
-  assert.match(r.stdout, /listening on/);
   assert.match(r.stdout, /engine print/);
+  assert.match(r.stdout, /voice eve/);
+  assert.doesNotMatch(r.stdout, /listening/);
 });
 
-test("off then on toggles listening flag", () => {
-  const home = freshHome();
-  assert.match(runCoda(["off"], { home }).stdout, /listening off/);
-  assert.match(runCoda(["on"], { home }).stdout, /listening on/);
-  assert.match(runCoda(["toggle"], { home }).stdout, /listening off/);
-});
-
-test("hook never auto-speaks Cursor replies", () => {
+test("old hook command stays quiet", () => {
   const home = freshHome();
   const payload = JSON.stringify({
     text: "All finished. The build is green.",
@@ -50,28 +44,6 @@ test("hook never auto-speaks Cursor replies", () => {
   assert.equal(r.stdout.trim(), "");
 });
 
-test("hook while muted speaks nothing", () => {
-  const home = freshHome();
-  runCoda(["off"], { home });
-  const payload = JSON.stringify({ text: "You should not hear this." });
-  const r = runCoda(["hook"], { home, input: payload });
-  assert.equal(r.status, 0);
-  assert.equal(r.stdout.trim(), "");
-});
-
-test("hook with missing text exits cleanly and says nothing", () => {
-  const home = freshHome();
-  const r = runCoda(["hook"], { home, input: JSON.stringify({ conversation_id: "x" }) });
-  assert.equal(r.status, 0);
-  assert.equal(r.stdout.trim(), "");
-});
-
-test("hook with malformed JSON exits 0 without breaking", () => {
-  const home = freshHome();
-  const r = runCoda(["hook"], { home, input: "not json {" });
-  assert.equal(r.status, 0);
-});
-
 test("replay speaks the last digest", () => {
   const home = freshHome();
   runCoda(["speak", "Remember this line."], { home });
@@ -80,12 +52,12 @@ test("replay speaks the last digest", () => {
   assert.match(r.stdout, /Remember this line\./);
 });
 
-test("hook skips a reply that is only code", () => {
+test("speak refuses a string that looks like a key", () => {
   const home = freshHome();
-  const payload = JSON.stringify({ text: "```js\nconst x = 1;\n```" });
-  const r = runCoda(["hook"], { home, input: payload });
+  const r = runCoda(["speak", "sk-or-testkeynotreal123"], { home });
   assert.equal(r.status, 0);
-  assert.equal(r.stdout.trim(), "");
+  assert.match(r.stderr, /looks like a key/);
+  assert.doesNotMatch(r.stdout, /sk-or-testkeynotreal123/);
 });
 
 test("unknown command exits non-zero with usage", () => {
@@ -93,4 +65,5 @@ test("unknown command exits non-zero with usage", () => {
   const r = runCoda(["frobnicate"], { home });
   assert.equal(r.status, 1);
   assert.match(r.stderr, /usage:/);
+  assert.doesNotMatch(r.stderr, /hook/);
 });

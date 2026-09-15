@@ -6,6 +6,8 @@ Coda stores keys in `~/.coda/secrets.json` with mode `600`. Paste an OpenRouter 
 
 Never commit those files. Never put a key in an issue, pull request, or screenshot.
 
+Coda will not read text that looks like an API key (`sk-…`).
+
 If a key was shared by mistake, revoke it at the provider and make a new one.
 
 ## Report a vulnerability

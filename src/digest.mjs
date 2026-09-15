@@ -1,7 +1,4 @@
-// Cursor-agnostic "smart last message" digester.
-//
-// Turns a finished assistant reply (markdown) into a short spoken wrap-up.
-// No Cursor types leak in here so a Grok bot or Mac reader can reuse it.
+// Turn long or messy text into a short spoken line.
 
 const DEFAULTS = {
   maxChars: 800,
@@ -30,10 +27,6 @@ const SPEECH_TAG_WORDS = new Set([
   "happy",
 ]);
 
-/**
- * Extract the inner text of the LAST author-provided <coda> or <!-- coda: --> block.
- * These are explicit spoken wrap-ups and always win over heuristics.
- */
 export function extractCodaTag(text) {
   if (typeof text !== "string") return null;
   let last = null;

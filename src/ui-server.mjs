@@ -4,11 +4,11 @@ import { readFileSync, existsSync, writeFileSync, mkdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { spawn } from "node:child_process";
-import { digest, splitBlocks } from "./digest.mjs";
+import { digest } from "./digest.mjs";
 import { speak, resolveEngine, pauseCurrent, resumeCurrent, stopCurrent, playbackStatus, togglePause } from "./tts.mjs";
-import { getState, setState, getConfig, setConfig, rememberSpoken, rememberReply, paths } from "./state.mjs";
-import { playBlocks, playClipboard, playGrab, cancelFollow } from "./player.mjs";
-import { formatHotkeys, normalizeHotkeys, DEFAULT_HOTKEYS } from "./hotkeys.mjs";
+import { getState, getConfig, setConfig, rememberSpoken, paths } from "./state.mjs";
+import { playGrab, cancelFollow } from "./player.mjs";
+import { formatHotkeys, normalizeHotkeys, DEFAULT_HOTKEYS, HOTKEY_ACTIONS } from "./hotkeys.mjs";
 import { setApiKey, clearApiKey, hasApiKey } from "./secrets.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -30,21 +30,33 @@ function snapshot() {
   const config = getConfig();
   const play = playbackStatus();
   return {
-    listening: Boolean(state.listening),
     ...play,
     voice: config.voice,
     engine: resolveEngine(config),
     model: config.model,
     lastDigest: state.lastDigest || "",
     lastSpokenAt: state.lastSpokenAt,
-    blocks: Array.isArray(state.blocks) ? state.blocks : [],
-    blockIndex: Number(state.blockIndex) || 0,
-    follow: Boolean(state.follow),
     voices: VOICES,
     hotkeys: config.hotkeys,
     hotkeyLabels: formatHotkeys(config.hotkeys),
     hasOpenRouterKey: hasApiKey("openrouter"),
   };
+}
+
+function isLocalHost(req) {
+  const host = String(req.headers.host || "").toLowerCase();
+  return (
+    host === `${HOST}:${PORT}` ||
+    host === HOST ||
+    host === "localhost" ||
+    host === `localhost:${PORT}`
+  );
+}
+
+function publicError(err) {
+  const msg = String(err && err.message ? err.message : "error");
+  if (/bearer|sk-|api[_-]?key/i.test(msg)) return "voice request failed";
+  return msg;
 }
 
 function json(res, code, body) {
@@ -59,8 +71,17 @@ function json(res, code, body) {
 function readBody(req) {
   return new Promise((resolve) => {
     let raw = "";
-    req.on("data", (c) => (raw += c));
+    let tooBig = false;
+    req.on("data", (c) => {
+      raw += c;
+      if (raw.length > 32 * 1024) {
+        tooBig = true;
+        req.destroy();
+        resolve({ __tooLarge: true });
+      }
+    });
     req.on("end", () => {
+      if (tooBig) return;
       if (!raw) return resolve({});
       try {
         resolve(JSON.parse(raw));
@@ -86,11 +107,8 @@ async function handleApi(req, res, url) {
 
   if (req.method !== "POST") return json(res, 404, { error: "not found" });
   const body = await readBody(req);
+  if (body.__tooLarge) return json(res, 413, { error: "too large" });
 
-  if (url.pathname === "/api/listening") {
-    setState({ listening: Boolean(body.on) });
-    return json(res, 200, snapshot());
-  }
   if (url.pathname === "/api/voice") {
     const voice = String(body.voice || "").toLowerCase();
     if (!VOICES.some((v) => v.id === voice)) return json(res, 400, { error: "unknown voice" });
@@ -123,6 +141,7 @@ async function handleApi(req, res, url) {
     }
     const current = getConfig().hotkeys;
     if (body.action && body.hotkey) {
+      if (!HOTKEY_ACTIONS.includes(body.action)) return json(res, 400, { error: "unknown shortcut" });
       setConfig({ hotkeys: { ...current, [body.action]: body.hotkey } });
       return json(res, 200, snapshot());
     }
@@ -150,25 +169,10 @@ async function handleApi(req, res, url) {
     stopCurrent();
     return json(res, 200, snapshot());
   }
-  if (url.pathname === "/api/block") {
-    const index = Number(body.index);
-    const follow = Boolean(body.follow);
-    playBlocks(index, { follow }).catch(() => {});
-    return json(res, 200, snapshot());
-  }
-  if (url.pathname === "/api/clipboard") {
-    const r = await playClipboard();
-    return json(res, r.ok ? 200 : 400, { ...snapshot(), ...r });
-  }
   if (url.pathname === "/api/grab") {
     const mode = String(body.mode || "auto");
     const r = await playGrab(mode);
     return json(res, r.ok ? 200 : 400, { ...snapshot(), grab: r });
-  }
-  if (url.pathname === "/api/load") {
-    const text = typeof body.text === "string" ? body.text : "";
-    rememberReply(text, splitBlocks(text));
-    return json(res, 200, snapshot());
   }
   if (url.pathname === "/api/replay") {
     const s = getState();
@@ -188,6 +192,11 @@ async function handleApi(req, res, url) {
 
 export function startUiServer({ openBrowser = true } = {}) {
   const server = createServer(async (req, res) => {
+    if (!isLocalHost(req)) {
+      res.writeHead(403);
+      res.end("forbidden");
+      return;
+    }
     const url = new URL(req.url || "/", `http://${HOST}:${PORT}`);
     try {
       if (url.pathname.startsWith("/api/")) return await handleApi(req, res, url);
@@ -204,7 +213,7 @@ export function startUiServer({ openBrowser = true } = {}) {
       res.writeHead(404);
       res.end("not found");
     } catch (e) {
-      json(res, 500, { error: e.message || "error" });
+      json(res, 500, { error: publicError(e) });
     }
   });
 

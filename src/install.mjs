@@ -1,5 +1,4 @@
-// Install Coda on this machine: remember where the repo lives, build the
-// Mac menu app, and optionally wire the (quiet) Cursor hook.
+// Install Coda on this machine: remember where the repo lives and build Coda.app.
 import { homedir } from "node:os";
 import { join, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -19,10 +18,6 @@ const here = dirname(fileURLToPath(import.meta.url));
 
 export function repoRoot() {
   return resolve(join(here, ".."));
-}
-
-export function hookScriptPath() {
-  return resolve(join(here, "..", "scripts", "after-agent-response.mjs"));
 }
 
 export function cliPath() {
@@ -78,10 +73,6 @@ function cursorDir() {
 
 export function hooksFilePath() {
   return process.env.CODA_HOOKS_FILE || join(cursorDir(), "hooks.json");
-}
-
-function hookCommand() {
-  return `node "${hookScriptPath()}"`;
 }
 
 function readHooks(path) {
@@ -249,15 +240,20 @@ export function installMacApp() {
   return { ok: true, app: written.app, bin: written.bin, already };
 }
 
+function quoteApple(value) {
+  return String(value).replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+}
+
 function addLoginItem(appPath) {
   if (process.platform !== "darwin") return;
+  const path = quoteApple(appPath);
   spawnSync(
     "osascript",
     [
       "-e",
       `tell application "System Events"
-        if (count of (every login item whose path is "${appPath}")) is 0 then
-          make login item at end with properties {path:"${appPath}", hidden:true}
+        if (count of (every login item whose path is "${path}")) is 0 then
+          make login item at end with properties {path:"${path}", hidden:true}
         end if
       end tell`,
     ],
@@ -267,11 +263,12 @@ function addLoginItem(appPath) {
 
 function removeLoginItem(appPath) {
   if (process.platform !== "darwin") return;
+  const path = quoteApple(appPath);
   spawnSync(
     "osascript",
     [
       "-e",
-      `tell application "System Events" to delete (every login item whose path is "${appPath}")`,
+      `tell application "System Events" to delete (every login item whose path is "${path}")`,
     ],
     { stdio: "ignore" }
   );
@@ -294,21 +291,6 @@ export function uninstallMacApp() {
   return { existed, app, bin };
 }
 
-export function installHook() {
-  const path = hooksFilePath();
-  const config = readHooks(path);
-  const list = Array.isArray(config.hooks.afterAgentResponse)
-    ? config.hooks.afterAgentResponse
-    : [];
-
-  const already = list.some(isCodaEntry);
-  if (!already) list.push({ command: hookCommand() });
-  config.hooks.afterAgentResponse = list;
-
-  writeHooks(path, config);
-  return { path, command: hookCommand(), alreadyInstalled: already };
-}
-
 export function uninstallHook() {
   const path = hooksFilePath();
   if (!existsSync(path)) return { path, removed: 0, existed: false };
@@ -327,11 +309,10 @@ export function uninstallHook() {
   return { path, removed, existed: true };
 }
 
-export function installAll({ cursor = false } = {}) {
+export function installAll() {
   const written = writeInstallPaths();
   const app = installMacApp();
-  const hook = cursor ? installHook() : null;
-  return { paths: written, app, hook };
+  return { paths: written, app };
 }
 
 export function uninstallAll() {
