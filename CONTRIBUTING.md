@@ -4,7 +4,7 @@ Thanks for wanting to help.
 
 ## Run it
 
-Node 18+. macOS if you are changing the menu app.
+Coda is a Mac app. Tests run with Node 18+ anywhere. You need a Mac to try the menu bar.
 
 ```bash
 npm test

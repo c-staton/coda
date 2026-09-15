@@ -271,8 +271,7 @@ async function main() {
         );
       } else if (r.app?.skipped && process.platform !== "darwin") {
         process.stdout.write(
-          "\nThis Mac menu is macOS-only. You can still run:\n" +
-            "  coda speak \"hello\"\n"
+          "\nCoda is a Mac app. It does not run on this computer.\n"
         );
       }
       if (r.hook) {

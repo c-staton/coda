@@ -107,7 +107,7 @@ function which(cmd) {
 
 export function installMacApp() {
   if (process.platform !== "darwin") {
-    return { skipped: true, reason: "Coda’s menu lives on macOS." };
+    return { skipped: true, reason: "Coda is a Mac app." };
   }
   if (process.env.CODA_SKIP_APP === "1") {
     return { skipped: true, reason: "skipped" };

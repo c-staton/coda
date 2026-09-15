@@ -4,19 +4,25 @@
 
 # Coda
 
-Highlight text in any Mac app. Press **Control-Option-X**. Coda reads it out loud.
+A Mac app. Highlight text in any app. Press **Control-Option-X**. Coda reads it out loud.
+
+It does not run on Windows or Linux.
+
+## What you need
+
+- A Mac
+- [Node 18+](https://nodejs.org/)
+- Apple’s command line tools (`xcode-select --install`)
+
+That’s it. When macOS asks, turn on **CodaBar** under System Settings → Privacy & Security → Accessibility.
 
 ## Install
-
-You need [Node 18+](https://nodejs.org/) and Apple’s command line tools (`xcode-select --install`).
 
 ```bash
 git clone https://github.com/c-staton/coda
 cd coda
 node src/cli.mjs install
 ```
-
-When macOS asks, turn on **CodaBar** under System Settings → Privacy & Security → Accessibility.
 
 Then highlight some text and press Control-Option-X.
 
@@ -41,16 +47,6 @@ The smiley blinks while the voice is loading.
 coda uninstall
 coda stop
 ```
-
-## Linux
-
-No menu bar. You can still do:
-
-```bash
-node src/cli.mjs speak "hello"
-```
-
-Install `espeak-ng` first.
 
 ## Develop
 

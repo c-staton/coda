@@ -14,6 +14,8 @@ about: Something is broken
 1.
 2.
 
+Coda is a Mac app.
+
 **Setup**
 
 - macOS version:

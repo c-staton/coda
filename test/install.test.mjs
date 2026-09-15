@@ -107,6 +107,22 @@ test("uninstall on a clean machine reports nothing to remove", () => {
   assert.match(r.stdout, /nothing to remove/);
 });
 
+test("install on a non-Mac machine says Coda is a Mac app", () => {
+  if (process.platform === "darwin") return;
+  const c = ctx();
+  const r = spawnSync(process.execPath, [CLI, "install"], {
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      CODA_HOME: c.home,
+      CODA_HOOKS_FILE: c.hooksFile,
+      CODA_ENGINE: "print",
+    },
+  });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /Coda is a Mac app/);
+});
+
 test("install --cursor refuses to clobber a malformed hooks.json", () => {
   const c = ctx();
   writeFileSync(c.hooksFile, "{ not valid json");
