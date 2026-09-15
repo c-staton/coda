@@ -54,12 +54,10 @@ The smiley goes dark while the voice is loading.
 
 ## What you hear
 
-Coda reads the highlight. A few things get a short word instead, so the sentence still works if you are only listening:
+Coda reads the highlight as written, except:
 
-- A key, a UUID, or any other token longer than a normal word → **code**
-- A long number (13 or more digits) → **number**
-
-Everything else is read as written.
+- A key, a UUID, or any other long token is replaced with the word **code**. The voice says “code.”
+- A number with 13 or more digits is replaced with the word **number**. The voice says “number.”
 
 To take it off this Mac:
 
