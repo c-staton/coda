@@ -1,11 +1,10 @@
 // Talk to the Mac grabber (any app: highlight, copy, or words under the mouse).
 import { spawnSync } from "node:child_process";
-import { homedir } from "node:os";
-import { join } from "node:path";
 import { existsSync } from "node:fs";
+import { installedCodaBin } from "./install.mjs";
 
 export function captureBin() {
-  return process.env.CODA_CAPTURE_BIN || join(homedir(), ".coda/bin/CodaBar");
+  return installedCodaBin();
 }
 
 export function grabScreen(mode = "auto") {

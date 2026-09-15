@@ -37,6 +37,8 @@ test("install writes paths.json and does not touch Cursor hooks", () => {
   assert.equal(rec.node, process.execPath);
   assert.match(rec.cli, /cli\.mjs$/);
   assert.ok(rec.repo);
+  assert.equal(rec.app, join(c.home, "Coda.app"));
+  assert.equal(rec.bin, join(c.home, "Coda.app", "Contents", "MacOS", "Coda"));
   assert.equal(existsSync(c.hooksFile), false);
 });
 

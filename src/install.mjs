@@ -11,6 +11,7 @@ import {
   existsSync,
   chmodSync,
   copyFileSync,
+  rmSync,
 } from "node:fs";
 import { paths } from "./state.mjs";
 
@@ -36,8 +37,35 @@ export function menuIconPath() {
   return resolve(join(here, "..", "apps", "macos", "MenuIcon.png"));
 }
 
-export function codaBarBinPath() {
+export function markPath() {
+  return resolve(join(here, "..", "apps", "macos", "Mark.png"));
+}
+
+export function infoPlistPath() {
+  return resolve(join(here, "..", "apps", "macos", "Info.plist"));
+}
+
+export function legacyCodaBarBinPath() {
   return join(paths.CODA_DIR, "bin", "CodaBar");
+}
+
+// Real installs go in ~/Applications so Accessibility shows Coda, not Terminal.
+// Tests set CODA_HOME and stay inside that folder.
+export function codaAppPath() {
+  if (process.env.CODA_APP) return process.env.CODA_APP;
+  if (process.env.CODA_HOME) return join(process.env.CODA_HOME, "Coda.app");
+  return join(homedir(), "Applications", "Coda.app");
+}
+
+export function codaBarBinPath() {
+  return join(codaAppPath(), "Contents", "MacOS", "Coda");
+}
+
+export function installedCodaBin() {
+  if (process.env.CODA_CAPTURE_BIN) return process.env.CODA_CAPTURE_BIN;
+  const bundled = codaBarBinPath();
+  if (existsSync(bundled)) return bundled;
+  return legacyCodaBarBinPath();
 }
 
 export function installPathsFile() {
@@ -95,6 +123,8 @@ export function writeInstallPaths() {
     node: process.execPath,
     cli: cliPath(),
     repo: repoRoot(),
+    app: codaAppPath(),
+    bin: codaBarBinPath(),
   };
   writeFileSync(installPathsFile(), JSON.stringify(rec, null, 2) + "\n", "utf8");
   return rec;
@@ -103,6 +133,57 @@ export function writeInstallPaths() {
 function which(cmd) {
   const r = spawnSync("which", [cmd], { encoding: "utf8" });
   return r.status === 0 ? (r.stdout || "").trim() : "";
+}
+
+export function writeCodaAppBundle({ dest, executable }) {
+  const macos = join(dest, "Contents", "MacOS");
+  const resources = join(dest, "Contents", "Resources");
+  mkdirSync(macos, { recursive: true });
+  mkdirSync(resources, { recursive: true });
+  copyFileSync(infoPlistPath(), join(dest, "Contents", "Info.plist"));
+  const bin = join(macos, "Coda");
+  copyFileSync(executable, bin);
+  chmodSync(bin, 0o755);
+  const menu = menuIconPath();
+  if (existsSync(menu)) copyFileSync(menu, join(resources, "MenuIcon.png"));
+  writeAppIcon(resources);
+  return { app: dest, bin };
+}
+
+function writeAppIcon(resourcesDir) {
+  const src = markPath();
+  if (!existsSync(src)) return;
+  copyFileSync(src, join(resourcesDir, "AppIcon.png"));
+  if (process.platform !== "darwin") return;
+  const iconset = join(resourcesDir, "AppIcon.iconset");
+  mkdirSync(iconset, { recursive: true });
+  const sizes = [
+    [16, "icon_16x16.png"],
+    [32, "icon_16x16@2x.png"],
+    [32, "icon_32x32.png"],
+    [64, "icon_32x32@2x.png"],
+    [128, "icon_128x128.png"],
+    [256, "icon_128x128@2x.png"],
+    [256, "icon_256x256.png"],
+    [512, "icon_256x256@2x.png"],
+    [512, "icon_512x512.png"],
+    [1024, "icon_512x512@2x.png"],
+  ];
+  for (const [px, name] of sizes) {
+    spawnSync("sips", ["-z", String(px), String(px), src, "--out", join(iconset, name)], {
+      stdio: "ignore",
+    });
+  }
+  spawnSync("iconutil", ["-c", "icns", iconset, "-o", join(resourcesDir, "AppIcon.icns")], {
+    stdio: "ignore",
+  });
+  rmSync(iconset, { recursive: true, force: true });
+}
+
+function stopCodaProcesses() {
+  for (const bin of [codaBarBinPath(), legacyCodaBarBinPath()]) {
+    spawnSync("pkill", ["-f", bin], { stdio: "ignore" });
+  }
 }
 
 export function installMacApp() {
@@ -124,15 +205,16 @@ export function installMacApp() {
         "Need Apple’s command line tools to build the menu app.\n  Run: xcode-select --install",
     };
   }
-  const bin = codaBarBinPath();
-  mkdirSync(dirname(bin), { recursive: true });
-  const already = existsSync(bin);
+  const app = codaAppPath();
+  const already = existsSync(app);
+  const stage = join(paths.CODA_DIR, "build", "Coda");
+  mkdirSync(dirname(stage), { recursive: true });
   const r = spawnSync(
     swiftc,
     [
       "-O",
       "-o",
-      bin,
+      stage,
       src,
       "-framework",
       "AppKit",
@@ -151,23 +233,20 @@ export function installMacApp() {
       reason: (r.stderr || r.stdout || "could not build the menu app").trim(),
     };
   }
-  try {
-    chmodSync(bin, 0o755);
-  } catch {
-    // ignore
+  stopCodaProcesses();
+  if (existsSync(app)) rmSync(app, { recursive: true, force: true });
+  mkdirSync(dirname(app), { recursive: true });
+  const written = writeCodaAppBundle({ dest: app, executable: stage });
+  spawnSync("xattr", ["-cr", app], { stdio: "ignore" });
+  spawnSync("codesign", ["--force", "--deep", "--sign", "-", app], { stdio: "ignore" });
+  const legacy = legacyCodaBarBinPath();
+  if (existsSync(legacy)) {
+    removeLoginItem(legacy);
+    rmSync(legacy, { force: true });
   }
-  const icon = menuIconPath();
-  if (existsSync(icon)) {
-    try {
-      copyFileSync(icon, join(dirname(bin), "MenuIcon.png"));
-    } catch {
-      // icon is optional; the menu still works
-    }
-  }
-  spawnSync("pkill", ["-f", bin], { stdio: "ignore" });
-  spawnSync("open", [bin], { stdio: "ignore" });
-  addLoginItem(bin);
-  return { ok: true, bin, already };
+  spawnSync("open", [app], { stdio: "ignore" });
+  addLoginItem(app);
+  return { ok: true, app: written.app, bin: written.bin, already };
 }
 
 function addLoginItem(appPath) {
@@ -199,13 +278,20 @@ function removeLoginItem(appPath) {
 }
 
 export function uninstallMacApp() {
+  const app = codaAppPath();
   const bin = codaBarBinPath();
-  const existed = existsSync(bin);
-  if (existed) {
-    spawnSync("pkill", ["-f", bin], { stdio: "ignore" });
-    removeLoginItem(bin);
+  const legacy = legacyCodaBarBinPath();
+  const existed = existsSync(app) || existsSync(legacy);
+  stopCodaProcesses();
+  if (existsSync(app)) {
+    removeLoginItem(app);
+    rmSync(app, { recursive: true, force: true });
   }
-  return { existed, bin };
+  if (existsSync(legacy)) {
+    removeLoginItem(legacy);
+    rmSync(legacy, { force: true });
+  }
+  return { existed, app, bin };
 }
 
 export function installHook() {

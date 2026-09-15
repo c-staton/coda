@@ -264,8 +264,9 @@ async function main() {
       );
       if (r.app?.ok) {
         process.stdout.write(
-          `  menu app: ${r.app.bin}\n\n` +
+          `  app: ${r.app.app}\n\n` +
             "Highlight text in any app, then press Control-Option-X.\n" +
+            "When macOS asks, turn on Coda under Privacy & Security → Accessibility.\n" +
             "Open Coda from the menu and paste your OpenRouter key for a better voice.\n" +
             "Remove it anytime with coda uninstall.\n"
         );

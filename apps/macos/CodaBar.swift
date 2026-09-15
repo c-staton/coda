@@ -279,7 +279,8 @@ final class Sound: NSObject, AVAudioPlayerDelegate {
 
 func ignoreApp(_ name: String, bundleId: String) -> Bool {
   let n = name.lowercased()
-  return n == "codabar" || n.contains("codabar")
+  if bundleId == "com.cstaton.coda" { return true }
+  return n == "coda" || n == "codabar" || n.contains("codabar")
 }
 
 func windowTitles(pid: pid_t) -> [String] {
@@ -494,7 +495,7 @@ func grabHighlight() -> Grab {
   let trusted = AXIsProcessTrusted()
   let note = trusted
     ? "Highlight the text, let go of the mouse, then tap Play. Grok Bot drops the highlight when you leave the app."
-    : "Turn on CodaBar in System Settings → Privacy & Security → Accessibility, then try again."
+    : "Turn on Coda in System Settings → Privacy & Security → Accessibility, then try again."
   let grab = Grab(ok: false, method: "selection", text: "", app: name, note: note)
   writeJson(grab, to: lastGrabPath)
   return grab
@@ -508,11 +509,16 @@ func notify(_ title: String, _ body: String) {
 }
 
 func menuIconCandidates() -> [String] {
-  var paths = [codaHome + "/bin/MenuIcon.png"]
+  var paths: [String] = []
+  if let bundled = Bundle.main.path(forResource: "MenuIcon", ofType: "png") {
+    paths.append(bundled)
+  }
   if let exe = CommandLine.arguments.first {
     let dir = URL(fileURLWithPath: exe).deletingLastPathComponent()
     paths.append(dir.appendingPathComponent("MenuIcon.png").path)
+    paths.append(dir.deletingLastPathComponent().appendingPathComponent("Resources").appendingPathComponent("MenuIcon.png").path)
   }
+  paths.append(codaHome + "/bin/MenuIcon.png")
   return paths
 }
 

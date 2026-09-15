@@ -10,7 +10,7 @@ Coda is a Mac app. Tests run with Node 18+ anywhere. You need a Mac to try the m
 npm test
 ```
 
-On a Mac, `node src/cli.mjs install` builds the menu app into `~/.coda/bin/CodaBar`.
+On a Mac, `node src/cli.mjs install` builds `~/Applications/Coda.app`.
 
 ## Pull requests
 

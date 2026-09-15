@@ -14,7 +14,7 @@ It does not run on Windows or Linux.
 - [Node 18+](https://nodejs.org/)
 - Apple’s command line tools (`xcode-select --install`)
 
-That’s it. When macOS asks, turn on **CodaBar** under System Settings → Privacy & Security → Accessibility.
+That’s it. When macOS asks, turn on **Coda** under System Settings → Privacy & Security → Accessibility. It should say Coda, not Terminal.
 
 ## Install
 

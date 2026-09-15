@@ -18,6 +18,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { paths, getState, setState } from "./state.mjs";
 import { getApiKey } from "./secrets.mjs";
+import { installedCodaBin } from "./install.mjs";
 
 function has(cmd) {
   const r = spawnSync("which", [cmd], { stdio: "ignore" });
@@ -53,7 +54,7 @@ function pidAlive(pid) {
 }
 
 function codaBin() {
-  return process.env.CODA_CAPTURE_BIN || join(homedir(), ".coda/bin/CodaBar");
+  return installedCodaBin();
 }
 
 function readPlayback() {
