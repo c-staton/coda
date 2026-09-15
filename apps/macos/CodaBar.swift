@@ -352,8 +352,58 @@ func looksLikeSecret(_ text: String) -> Bool {
   return t.hasPrefix("sk-") || t.hasPrefix("sk-or-") || t.hasPrefix("sk-xai-")
 }
 
+func tokenCore(_ token: String) -> (String, String, String) {
+  let chars = Array(token)
+  var i = 0
+  var j = chars.count
+  func wordChar(_ c: Character) -> Bool { c.isLetter || c.isNumber }
+  while i < j && !wordChar(chars[i]) { i += 1 }
+  while j > i && !wordChar(chars[j - 1]) { j -= 1 }
+  return (String(chars[0..<i]), String(chars[i..<j]), String(chars[j..<chars.count]))
+}
+
+func looksLikeUUID(_ text: String) -> Bool {
+  let parts = text.split(separator: "-")
+  guard parts.count == 5,
+        parts[0].count == 8, parts[1].count == 4,
+        parts[2].count == 4, parts[3].count == 4,
+        parts[4].count == 12 else { return false }
+  return text.allSatisfy { $0.isHexDigit || $0 == "-" }
+}
+
+func isUnreadableToken(_ token: String) -> Bool {
+  let core = tokenCore(token).1
+  if core.isEmpty { return false }
+  if looksLikeSecret(core) { return true }
+  if looksLikeUUID(core) { return true }
+  let digits = core.filter { $0.isNumber }
+  if digits.count >= 13 && core.allSatisfy({ $0.isNumber || $0 == "," || $0 == "_" }) { return true }
+  if core.count >= 20 && core.allSatisfy({ $0.isHexDigit }) { return true }
+  return core.count > 24
+}
+
+func spokenWord(_ core: String) -> String {
+  if core.allSatisfy({ $0.isNumber || $0 == "," || $0 == "_" }) && core.filter({ $0.isNumber }).count >= 13 {
+    return "number"
+  }
+  return "code"
+}
+
+func forSpeech(_ text: String) -> String {
+  let parts = text.split(separator: " ", omittingEmptySubsequences: false)
+  let swapped = parts.map { raw -> String in
+    let token = String(raw)
+    if token.isEmpty || !isUnreadableToken(token) { return token }
+    let pieces = tokenCore(token)
+    return pieces.0 + spokenWord(pieces.1) + pieces.2
+  }
+  return swapped.joined(separator: " ")
+    .replacingOccurrences(of: "  +", with: " ", options: .regularExpression)
+    .trimmingCharacters(in: .whitespacesAndNewlines)
+}
+
 func saveHighlight(_ text: String, app: String) {
-  let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+  let trimmed = forSpeech(text)
   if trimmed.count < 2 || looksLikeSecret(trimmed) { return }
   writeJson(SavedHighlight(text: trimmed, app: app, at: Date().timeIntervalSince1970), to: lastHighlightPath)
 }
@@ -471,26 +521,18 @@ func grabHighlight() -> Grab {
 
   let ax = axSelectedText(pid: app.processIdentifier)
   if !ax.isEmpty {
-    if looksLikeSecret(ax) {
-      let grab = Grab(ok: false, method: "selection", text: "", app: name, note: "that looks like a key. Coda will not read it.")
-      writeJson(grab, to: lastGrabPath)
-      return grab
-    }
-    saveHighlight(ax, app: name)
-    let grab = Grab(ok: true, method: "highlight", text: ax, app: name, note: "highlighted text")
+    let spoken = forSpeech(ax)
+    saveHighlight(spoken, app: name)
+    let grab = Grab(ok: !spoken.isEmpty, method: "highlight", text: spoken, app: name, note: "highlighted text")
     writeJson(grab, to: lastGrabPath)
     return grab
   }
 
   let copied = copyInApp(app)
   if !copied.isEmpty {
-    if looksLikeSecret(copied) {
-      let grab = Grab(ok: false, method: "selection", text: "", app: name, note: "that looks like a key. Coda will not read it.")
-      writeJson(grab, to: lastGrabPath)
-      return grab
-    }
-    saveHighlight(copied, app: name)
-    let grab = Grab(ok: true, method: "copy", text: copied, app: name, note: "read the highlight via Copy")
+    let spoken = forSpeech(copied)
+    saveHighlight(spoken, app: name)
+    let grab = Grab(ok: !spoken.isEmpty, method: "copy", text: spoken, app: name, note: "read the highlight via Copy")
     writeJson(grab, to: lastGrabPath)
     return grab
   }

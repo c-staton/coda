@@ -19,7 +19,7 @@ import { join } from "node:path";
 import { paths, getState, setState } from "./state.mjs";
 import { getApiKey } from "./secrets.mjs";
 import { installedCodaBin } from "./install.mjs";
-import { looksLikeSecret } from "./secret-text.mjs";
+import { forSpeech } from "./secret-text.mjs";
 
 function has(cmd) {
   const r = spawnSync("which", [cmd], { stdio: "ignore" });
@@ -271,24 +271,24 @@ function synthOpenai(text, config) {
 
 export async function speak(text, config, options = {}) {
   const engine = resolveEngine(config);
+  const spoken = forSpeech(text);
 
-  if (!text || !text.trim()) return { engine, played: false, audioPath: null };
-  if (looksLikeSecret(text)) return { engine, played: false, audioPath: null, skipped: true };
+  if (!spoken) return { engine, played: false, audioPath: null };
   if (options.dryRun) return { engine, played: false, audioPath: null, dryRun: true };
 
   if (engine === "print") {
-    process.stdout.write(`${text}\n`);
+    process.stdout.write(`${spoken}\n`);
     return { engine, played: false, audioPath: null };
   }
 
   codaCtl("loading");
   let audioPath;
   try {
-    if (engine === "espeak") audioPath = synthEspeak(text, config);
-    else if (engine === "apple") audioPath = synthApple(text, config);
-    else if (engine === "grok") audioPath = await synthGrok(text, config);
-    else if (engine === "openai") audioPath = await synthOpenai(text, config);
-    else if (engine === "openrouter") audioPath = await synthOpenrouter(text, config);
+    if (engine === "espeak") audioPath = synthEspeak(spoken, config);
+    else if (engine === "apple") audioPath = synthApple(spoken, config);
+    else if (engine === "grok") audioPath = await synthGrok(spoken, config);
+    else if (engine === "openai") audioPath = await synthOpenai(spoken, config);
+    else if (engine === "openrouter") audioPath = await synthOpenrouter(spoken, config);
     else throw new Error(`Unknown engine: ${engine}`);
   } catch (err) {
     codaCtl("stop");

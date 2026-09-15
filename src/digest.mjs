@@ -1,4 +1,5 @@
 // Turn long or messy text into a short spoken line.
+import { forSpeech } from "./secret-text.mjs";
 
 const DEFAULTS = {
   maxChars: 800,
@@ -135,7 +136,7 @@ export function digest(text, options = {}) {
 
   // 1. Explicit author wrap-up wins.
   const tagged = extractCodaTag(text);
-  if (tagged) return clampToBatchLimit(tagged);
+  if (tagged) return clampToBatchLimit(forSpeech(tagged));
 
   // 2. Reduce markdown to plain prose.
   let prose = text;
@@ -144,6 +145,7 @@ export function digest(text, options = {}) {
   prose = stripBlockMarkdown(prose);
   prose = stripInlineNoise(prose);
   prose = collapseWhitespace(prose);
+  prose = forSpeech(prose);
 
   // 3. Nothing meaningful left (was mostly code / tables / trivial).
   if (!prose || prose.length < opts.minChars) return null;
@@ -187,7 +189,7 @@ export function splitBlocks(text, options = {}) {
 
   const paras = prose
     .split(/\n\s*\n/)
-    .map((p) => collapseWhitespace(p))
+    .map((p) => forSpeech(collapseWhitespace(p)))
     .filter((p) => p.length >= 3 && /[a-zA-Z0-9]/.test(p));
 
   const blocks = [];

@@ -52,12 +52,20 @@ test("replay speaks the last digest", () => {
   assert.match(r.stdout, /Remember this line\./);
 });
 
-test("speak refuses a string that looks like a key", () => {
+test("speak says code instead of reading a key", () => {
   const home = freshHome();
   const r = runCoda(["speak", "sk-or-testkeynotreal123"], { home });
   assert.equal(r.status, 0);
-  assert.match(r.stderr, /looks like a key/);
+  assert.match(r.stdout, /^code$/m);
   assert.doesNotMatch(r.stdout, /sk-or-testkeynotreal123/);
+});
+
+test("speak keeps a sentence and says code for a UUID", () => {
+  const home = freshHome();
+  const r = runCoda(["speak", "User 550e8400-e29b-41d4-a716-446655440000 signed in."], { home });
+  assert.equal(r.status, 0);
+  assert.match(r.stdout, /User code signed in/);
+  assert.doesNotMatch(r.stdout, /550e8400/);
 });
 
 test("unknown command exits non-zero with usage", () => {

@@ -7,7 +7,7 @@ import { cancelFollow, playRaw, playGrab } from "./player.mjs";
 import { startUiServer } from "./ui-server.mjs";
 import { installAll, uninstallAll } from "./install.mjs";
 import { setApiKey, hasApiKey } from "./secrets.mjs";
-import { looksLikeSecret } from "./secret-text.mjs";
+import { forSpeech } from "./secret-text.mjs";
 
 function readStdin() {
   return new Promise((resolve) => {
@@ -35,10 +35,8 @@ function printStatus() {
 
 async function speakText(text, { wait = false } = {}) {
   const c = getConfig();
-  if (looksLikeSecret(text)) return { skipped: true, secret: true };
-  const spoken = digest(text, { maxChars: c.maxChars });
+  const spoken = forSpeech(digest(text, { maxChars: c.maxChars }) || "");
   if (!spoken) return { skipped: true };
-  if (looksLikeSecret(spoken)) return { skipped: true, secret: true };
   const result = await speak(spoken, c, { wait });
   rememberSpoken(spoken);
   return { ...result, spoken };
@@ -60,8 +58,7 @@ async function main() {
       const text = rest.join(" ") || (await readStdin());
       try {
         const r = await speakText(text, { wait: true });
-        if (r.secret) process.stderr.write("coda: that looks like a key. Coda will not read it.\n");
-        else if (r.skipped) process.stdout.write("coda: nothing worth speaking (skipped)\n");
+        if (r.skipped) process.stdout.write("coda: nothing worth speaking (skipped)\n");
         else if (r.audioPath) process.stdout.write(`coda: audio -> ${r.audioPath}\n`);
         return 0;
       } catch (e) {

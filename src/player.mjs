@@ -4,7 +4,7 @@ import { speak, playbackStatus, stopCurrent, pauseCurrent, resumeCurrent } from 
 import { getState, setState, getConfig, rememberSpoken, rememberReply, paths } from "./state.mjs";
 import { splitBlocks } from "./digest.mjs";
 import { grabScreen } from "./grab.mjs";
-import { looksLikeSecret } from "./secret-text.mjs";
+import { forSpeech } from "./secret-text.mjs";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -72,19 +72,20 @@ export async function playBlocks(startIndex, { follow = false } = {}) {
 export async function playRaw(text) {
   const raw = String(text || "").trim();
   if (!raw) return { ok: false, reason: "nothing to read" };
-  if (looksLikeSecret(raw)) return { ok: false, reason: "that looks like a key. Coda will not read it." };
+  const spoken = forSpeech(raw);
+  if (!spoken) return { ok: false, reason: "nothing to read" };
   cancelled = true;
   stopCurrent();
   cancelled = false;
-  const blocks = splitBlocks(raw);
+  const blocks = splitBlocks(spoken);
   if (blocks.length > 1) {
-    rememberReply(raw, blocks);
+    rememberReply(spoken, blocks);
     playBlocks(0, { follow: true }).catch(() => {});
-    return { ok: true, text: raw, queued: true };
+    return { ok: true, text: spoken, queued: true };
   }
-  await speak(raw, getConfig(), { wait: false });
-  rememberSpoken(raw);
-  return { ok: true, text: raw };
+  await speak(spoken, getConfig(), { wait: false });
+  rememberSpoken(spoken);
+  return { ok: true, text: spoken };
 }
 
 export function sameUtterance(a, b) {
