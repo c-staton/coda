@@ -6,6 +6,7 @@
 - In Cursor and other apps that do not expose the highlight, wait until Control-Option is up, then Copy.
 - Do not replay a highlight from another window.
 - Menu item is Quit Coda.
+- `./install` builds for this Mac even if the command line tools are leftover or mixed.
 
 If you already installed:
 
