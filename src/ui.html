@@ -163,7 +163,7 @@
         </div>
         <div>
           <h1>Coda</h1>
-          <p class="sub">Highlight text. Down reads it. Down again puts the next bit in line.</p>
+          <p class="sub">Any text on your Mac. Any app or website.</p>
         </div>
       </div>
     </header>
@@ -227,7 +227,7 @@
       <div class="row">
         <div>
           <div class="label">OpenRouter key</div>
-          <div class="hint" id="keyHint">Paste it here to unlock OpenRouter voices.</div>
+          <div class="hint" id="keyHint">Optional. Without it, Coda uses the Mac voice.</div>
         </div>
       </div>
       <div class="key-row">
@@ -328,7 +328,7 @@
       }
       $("keyHint").textContent = state.hasOpenRouterKey
         ? "Saved on this Mac."
-        : "Paste it here to unlock OpenRouter voices.";
+        : "Optional. Without it, Coda uses the Mac voice.";
       $("keySave").textContent = state.hasOpenRouterKey ? "Replace" : "Save";
       $("keyInput").placeholder = state.hasOpenRouterKey ? "••••••••" : "sk-or-...";
     }

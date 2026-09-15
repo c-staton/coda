@@ -4,7 +4,7 @@
 
 # Coda
 
-A Mac app. Highlight text in any app. Press **Control-Option-Down**. Coda reads it out loud. Press Down again while it is talking and the next bit waits in line.
+Coda reads any text on your Mac. Highlight it in an app or on a website. Hear it out loud.
 
 It does not run on Windows or Linux.
 
@@ -13,8 +13,9 @@ It does not run on Windows or Linux.
 - A Mac (Intel or Apple silicon)
 - [Node 18+](https://nodejs.org/)
 - Apple’s command line tools (`xcode-select --install`)
+- An [OpenRouter key](https://openrouter.ai/keys) if you want those voices. Optional. Without it, Coda uses the Mac’s built-in voice.
 
-That’s it. When macOS asks, turn on **Coda** under System Settings → Privacy & Security → Accessibility. It should say Coda. Leave Node and Terminal off.
+When macOS asks, turn on **Coda** under System Settings → Privacy & Security → Accessibility. It should say Coda.
 
 ## Install
 
@@ -24,28 +25,30 @@ cd coda
 ./install
 ```
 
-Then highlight some text and press Control-Option-Down. Press Down again to put the next bit in line.
+Then highlight text in any app or website and play it.
 
-## Better voice
+## Voice
 
-Open **Coda** from the menu bar. Paste your [OpenRouter key](https://openrouter.ai/keys). Then pick a voice. Voices are grouped by OpenRouter model.
+Coda is meant to be used with [OpenRouter](https://openrouter.ai/keys). Open Coda, paste your key, and pick a voice.
+
+The key is optional. Without it, Coda falls back to the Mac’s built-in voice.
 
 The key stays on this Mac in `~/.coda/secrets.json`. It never goes in git.
 
-Without a key, Coda uses your Mac’s built-in voice.
-
 ## Use
 
-Highlight text. **Control-Option-Down** reads it. If Coda is already talking, that new text waits in line. Clips play in the order you added them. While one plays, Coda gets the next one ready so it can start right away.
+Highlight text anywhere on the Mac and play it. If Coda is already talking, the new text waits its turn. Clips play in order. While one plays, Coda gets the next one ready so it can start right away.
 
 The menu bar shows how many are waiting.
 
 | | |
 | --- | --- |
-| **Control-Option-Down** | Read this, or put it next in line |
-| **Control-Option-Left** | Play or pause |
-| **Control-Option-Right** | Skip this one. Play the next in line. |
+| **Queue** | Read this, or put it next |
+| **Play / pause** | Pause or keep going |
+| **Skip** | Drop this one. Play the next. |
 | **Coda menu** | Queue, play / pause, skip, stop, pick a voice, open settings |
+
+Change the shortcuts in Coda.
 
 The smiley goes dark while the voice is loading.
 

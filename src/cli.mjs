@@ -271,10 +271,10 @@ async function main() {
       if (r.app?.ok) {
         process.stdout.write(
           `  app: ${r.app.app}\n\n` +
-            "Highlight text in any app, then press Control-Option-Down.\n" +
+            "Coda reads any text on this Mac. Highlight it in any app or website.\n" +
             "When macOS asks, turn on Coda under Privacy & Security → Accessibility.\n" +
-            "It should say Coda. Leave Node and Terminal off.\n" +
-            "Open Coda from the menu and paste your OpenRouter key for a better voice.\n" +
+            "It should say Coda.\n" +
+            "Paste an OpenRouter key in Coda if you want those voices. Without it, Coda uses the Mac voice.\n" +
             "Remove it anytime with coda uninstall.\n"
         );
       } else if (r.app?.skipped && process.platform !== "darwin") {
