@@ -43,6 +43,15 @@ Without a key, Coda uses your Mac’s built-in voice.
 
 The smiley blinks while the voice is loading.
 
+## What you hear
+
+Coda reads the highlight. A few things get a short word instead, so the sentence still works if you are only listening:
+
+- A key, a UUID, or any other token longer than a normal word → **code**
+- A long number (13 or more digits) → **number**
+
+Everything else is read as written.
+
 ```
 coda uninstall
 coda stop

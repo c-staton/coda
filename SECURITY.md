@@ -6,7 +6,7 @@ Coda stores keys in `~/.coda/secrets.json` with mode `600`. Paste an OpenRouter 
 
 Never commit those files. Never put a key in an issue, pull request, or screenshot.
 
-Coda will not read API keys, UUIDs, or other tokens longer than a normal word. It says “code” or “number” instead so the sentence still works.
+Coda does not read API keys, UUIDs, or other tokens longer than a normal word. It says **code** or **number** so the sentence still works. See the README.
 
 If a key was shared by mistake, revoke it at the provider and make a new one.
 
