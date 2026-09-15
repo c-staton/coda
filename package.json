@@ -23,6 +23,8 @@
     "src",
     "apps/macos",
     "scripts",
+    "install",
+    "uninstall",
     "README.md",
     "LICENSE",
     "CONTRIBUTING.md",

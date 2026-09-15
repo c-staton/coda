@@ -21,7 +21,7 @@ That’s it. When macOS asks, turn on **Coda** under System Settings → Privacy
 ```bash
 git clone https://github.com/c-staton/coda
 cd coda
-node src/cli.mjs install
+./install
 ```
 
 Then highlight some text and press Control-Option-X.
@@ -52,9 +52,10 @@ Coda reads the highlight. A few things get a short word instead, so the sentence
 
 Everything else is read as written.
 
-```
-coda uninstall
-coda stop
+To take it off this Mac:
+
+```bash
+./uninstall
 ```
 
 ## Develop

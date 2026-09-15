@@ -102,6 +102,23 @@ test("install on a non-Mac machine says Coda is a Mac app", () => {
   assert.match(r.stdout, /Coda is a Mac app/);
 });
 
+test("./install is the first-time command", () => {
+  const c = ctx();
+  const script = fileURLToPath(new URL("../install", import.meta.url));
+  const r = spawnSync(script, [], {
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      CODA_HOME: c.home,
+      CODA_HOOKS_FILE: c.hooksFile,
+      CODA_ENGINE: "print",
+      CODA_SKIP_APP: "1",
+    },
+  });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /installed/);
+});
+
 test("install leaves a malformed hooks.json alone", () => {
   const c = ctx();
   writeFileSync(c.hooksFile, "{ not valid json");
