@@ -9,6 +9,7 @@ import { speak, resolveEngine, pauseCurrent, resumeCurrent, stopCurrent, playbac
 import { getState, setState, getConfig, setConfig, rememberSpoken, rememberReply, paths } from "./state.mjs";
 import { playBlocks, playClipboard, playGrab, cancelFollow } from "./player.mjs";
 import { formatHotkeys, normalizeHotkeys, DEFAULT_HOTKEYS } from "./hotkeys.mjs";
+import { setApiKey, clearApiKey, hasApiKey } from "./secrets.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const HTML_PATH = join(here, "ui.html");
@@ -42,6 +43,7 @@ function snapshot() {
     voices: VOICES,
     hotkeys: config.hotkeys,
     hotkeyLabels: formatHotkeys(config.hotkeys),
+    hasOpenRouterKey: hasApiKey("openrouter"),
   };
 }
 
@@ -94,6 +96,25 @@ async function handleApi(req, res, url) {
     if (!VOICES.some((v) => v.id === voice)) return json(res, 400, { error: "unknown voice" });
     setConfig({ voice });
     return json(res, 200, snapshot());
+  }
+  if (url.pathname === "/api/key") {
+    if (body.clear) {
+      clearApiKey("openrouter");
+      return json(res, 200, snapshot());
+    }
+    const key = String(body.key || "").trim();
+    if (key.length < 8) return json(res, 400, { error: "paste your OpenRouter key" });
+    setApiKey("openrouter", key);
+    setConfig({
+      engine: "openrouter",
+      model: getConfig().model || "x-ai/grok-voice-tts-1.0",
+      voice: getConfig().voice || "eve",
+    });
+    const out = snapshot();
+    if (JSON.stringify(out).includes(key)) {
+      return json(res, 500, { error: "key leaked" });
+    }
+    return json(res, 200, out);
   }
   if (url.pathname === "/api/hotkeys") {
     if (body.reset) {

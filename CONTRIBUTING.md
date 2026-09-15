@@ -23,8 +23,8 @@ On a Mac, `node src/cli.mjs install` builds the menu app into `~/.coda/bin/CodaB
 
 | Path | What it is |
 | --- | --- |
-| `src/` | CLI, speak engine, settings server |
-| `apps/macos/CodaBar.swift` | Menu bar app (hotkeys, highlight, playback) |
+| `src/` | CLI, speak engine, settings |
+| `apps/macos/` | Menu bar app and the smiley |
 | `test/` | `node --test` |
 
-Please keep the README in plain language. If a newcomer cannot install from the first screen, the docs are not done.
+Keep the README short. If someone cannot install from it, the docs are not done.

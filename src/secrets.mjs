@@ -58,4 +58,13 @@ export function hasApiKey(kind) {
   return Boolean(getApiKey(kind));
 }
 
+export function clearApiKey(kind) {
+  const name = KEY_NAMES[kind];
+  if (!name) throw new Error(`unknown key kind "${kind}"`);
+  const next = { ...readSecrets() };
+  delete next[name];
+  writeSecrets(next);
+  return { name, path: SECRETS_PATH };
+}
+
 export const secretPaths = { SECRETS_PATH, KEY_NAMES };

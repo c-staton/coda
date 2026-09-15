@@ -132,7 +132,7 @@ async function main() {
         process.stderr.write(`coda: ${r.note || r.reason || "could not grab text"}\n`);
         return 1;
       }
-      process.stdout.write(`coda: ${r.method} from ${r.app || "app"} — "${(r.text || "").slice(0, 70)}"\n`);
+      process.stdout.write(`coda: ${r.method} from ${r.app || "app"}: "${(r.text || "").slice(0, 70)}"\n`);
       return 0;
     }
     case "ui": {
@@ -240,7 +240,7 @@ async function main() {
       }
       process.stdout.write(
         `coda: saved ${r.name} and switched to ${label}.\n` +
-          `  (kept only on this Mac at ${r.path} — not in git)\n`
+          `  kept only on this Mac at ${r.path}. not in git.\n`
       );
       return 0;
     }
@@ -259,15 +259,14 @@ async function main() {
       const engine = resolveEngine(getConfig());
       const already = Boolean(r.app?.already || r.hook?.alreadyInstalled);
       process.stdout.write(
-        (already ? "coda: already set up — refreshed.\n" : "coda: installed.\n") +
-          `  voice: ${engine}${engine === "print" ? " (no speaker found — see README)" : ""}\n`
+        (already ? "coda: already set up. refreshed.\n" : "coda: installed.\n") +
+          `  voice: ${engine}${engine === "print" ? " (no speaker found. see the README)" : ""}\n`
       );
       if (r.app?.ok) {
         process.stdout.write(
           `  menu app: ${r.app.bin}\n\n` +
             "Highlight text in any app, then press Control-Option-X.\n" +
-            "Use the Coda menu for play/pause, stop, and voice.\n" +
-            "Better voice: coda key openrouter YOUR_KEY\n" +
+            "Open Coda from the menu and paste your OpenRouter key for a better voice.\n" +
             "Remove it anytime with coda uninstall.\n"
         );
       } else if (r.app?.skipped && process.platform !== "darwin") {

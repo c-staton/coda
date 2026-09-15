@@ -15,6 +15,7 @@
       --fill: #1c1c1c;
       --hover: #262626;
       --sel: #2f2f2f;
+      --mark: #222;
     }
     * { box-sizing: border-box; }
     html, body {
@@ -27,21 +28,30 @@
     main {
       max-width: 420px;
       margin: 0 auto;
-      padding: 24px 22px 36px;
+      padding: 28px 22px 40px;
     }
-    header { margin-bottom: 14px; }
+    header { margin-bottom: 18px; }
     .brand {
       display: flex;
       align-items: center;
-      gap: 10px;
+      gap: 12px;
     }
-    .brand img {
-      width: 28px;
-      height: 28px;
+    .mark {
+      width: 36px;
+      height: 36px;
+      border-radius: 10px;
+      background: var(--mark);
+      display: grid;
+      place-items: center;
+      flex: 0 0 36px;
+    }
+    .mark img {
+      width: 22px;
+      height: 22px;
       display: block;
       filter: invert(1);
     }
-    .brand img.busy {
+    .mark.busy img {
       animation: coda-pulse 0.7s ease-in-out infinite;
     }
     @keyframes coda-pulse {
@@ -49,12 +59,12 @@
     }
     h1 {
       margin: 0;
-      font-size: 15px;
+      font-size: 16px;
       font-weight: 600;
       letter-spacing: -0.02em;
     }
     .sub {
-      margin: 4px 0 0;
+      margin: 2px 0 0;
       color: var(--muted);
     }
     section { border-top: 1px solid var(--line); }
@@ -113,6 +123,32 @@
       color: var(--fg);
       border-color: #3a3a3a;
     }
+    .key-row {
+      display: flex;
+      gap: 8px;
+      padding: 0 0 8px;
+    }
+    .key-row input {
+      flex: 1;
+      min-width: 0;
+      border: 1px solid var(--line);
+      background: var(--fill);
+      color: var(--fg);
+      border-radius: 6px;
+      padding: 7px 10px;
+      font: inherit;
+    }
+    .key-row input:focus {
+      outline: none;
+      border-color: #4a4a4a;
+    }
+    .link {
+      display: inline-block;
+      color: var(--muted);
+      padding-bottom: 12px;
+      text-decoration: none;
+    }
+    .link:hover { color: var(--fg); }
     .status { color: var(--muted); font-size: 12px; }
     .err { color: #d0a0a0; }
   </style>
@@ -121,10 +157,14 @@
   <main>
     <header>
       <div class="brand">
-        <img id="brandIcon" src="/icon.png" alt="" width="28" height="28" />
-        <h1>Coda</h1>
+        <div class="mark" id="brandMark">
+          <img id="brandIcon" src="/icon.png" alt="" width="22" height="22" />
+        </div>
+        <div>
+          <h1>Coda</h1>
+          <p class="sub">Highlight text, then play it.</p>
+        </div>
       </div>
-      <p class="sub">Highlight text, then play it.</p>
     </header>
 
     <section>
@@ -157,6 +197,20 @@
       </div>
       <div class="voices" id="voices"></div>
     </section>
+
+    <section>
+      <div class="row">
+        <div>
+          <div class="label">OpenRouter key</div>
+          <div class="hint" id="keyHint">Paste it here for Eve and the other voices.</div>
+        </div>
+      </div>
+      <div class="key-row">
+        <input id="keyInput" type="password" autocomplete="off" spellcheck="false" placeholder="sk-or-..." />
+        <button class="ghost" id="keySave">Save</button>
+      </div>
+      <a class="link" href="https://openrouter.ai/keys" target="_blank" rel="noreferrer">Get a key</a>
+    </section>
   </main>
   <script>
     const $ = (id) => document.getElementById(id);
@@ -174,7 +228,8 @@
       state = await res.json();
       if (path !== "/api/state") {
         lastError = "";
-        if (state.grab && !state.grab.ok) lastError = state.grab.note || "Couldn’t read the highlight.";
+        if (state.error) lastError = state.error;
+        else if (state.grab && !state.grab.ok) lastError = state.grab.note || "Couldn’t read the highlight.";
         else if (state.reason && state.ok === false) lastError = state.reason;
       }
       render();
@@ -190,6 +245,7 @@
         playing: state.playing,
         paused: state.paused,
         loading: state.loading,
+        hasOpenRouterKey: state.hasOpenRouterKey,
         lastError,
         labels,
         recording,
@@ -200,12 +256,17 @@
       $("engineHint").textContent = state.voice || "";
       $("status").className = "status" + (lastError ? " err" : "");
       $("status").textContent = lastError || (state.loading ? "Getting the voice…" : state.paused ? "Paused" : state.playing ? "Playing" : "");
-      $("brandIcon").classList.toggle("busy", Boolean(state.loading));
+      $("brandMark").classList.toggle("busy", Boolean(state.loading));
       $("hotkeyPlay").textContent = recording === "play" ? "Press keys…" : (labels.play || "Control-Option-X");
       $("hotkeyPlay").classList.toggle("recording", recording === "play");
       $("voices").innerHTML = (state.voices || []).map((v) => `
         <button class="voice ${state.voice === v.id ? "selected" : ""}" data-voice="${v.id}">${v.label}</button>
       `).join("");
+      $("keyHint").textContent = state.hasOpenRouterKey
+        ? "Saved on this Mac."
+        : "Paste it here for Eve and the other voices.";
+      $("keySave").textContent = state.hasOpenRouterKey ? "Replace" : "Save";
+      $("keyInput").placeholder = state.hasOpenRouterKey ? "••••••••" : "sk-or-...";
     }
 
     $("playHighlight").onclick = () => api("/api/grab", { mode: "selection" });
@@ -213,6 +274,14 @@
       const btn = e.target.closest("[data-voice]");
       if (btn) api("/api/voice", { voice: btn.dataset.voice });
     };
+    $("keySave").onclick = () => {
+      const key = $("keyInput").value.trim();
+      if (!key) return;
+      api("/api/key", { key }).then(() => { $("keyInput").value = ""; });
+    };
+    $("keyInput").addEventListener("keydown", (e) => {
+      if (e.key === "Enter") $("keySave").click();
+    });
     $("hotkeyPlay").onclick = () => { recording = "play"; lastSig = ""; render(); };
     window.addEventListener("keydown", (e) => {
       if (!recording) return;

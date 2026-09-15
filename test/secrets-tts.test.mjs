@@ -1,9 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, readFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { grokRequestBody, openrouterRequestBody } from "../src/tts.mjs";
 
@@ -67,4 +67,45 @@ test("coda key xai saves the key and switches engine to grok", () => {
   assert.match(r.stdout, /Grok/);
   const status = spawnSync(process.execPath, [CLI, "status"], { encoding: "utf8", env });
   assert.match(status.stdout, /engine grok/);
+});
+
+test("settings key save never echoes the key", async () => {
+  const home = mkdtempSync(join(tmpdir(), "coda-ui-key-"));
+  const port = 18000 + Math.floor(Math.random() * 1000);
+  const env = { ...process.env, CODA_HOME: home, CODA_UI_PORT: String(port), CODA_ENGINE: "print" };
+  delete env.OPENROUTER_API_KEY;
+  const child = spawn(process.execPath, [CLI, "ui", "--no-open"], { env, stdio: "ignore" });
+  const secret = "sk-or-test-not-a-real-key-xyz";
+  try {
+    let ready = false;
+    for (let i = 0; i < 40; i++) {
+      try {
+        const ping = await fetch(`http://127.0.0.1:${port}/api/state`);
+        if (ping.ok) {
+          ready = true;
+          break;
+        }
+      } catch {
+        // wait
+      }
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    assert.equal(ready, true, "settings server did not start");
+    const before = await (await fetch(`http://127.0.0.1:${port}/api/state`)).json();
+    assert.equal(before.hasOpenRouterKey, false);
+    const saved = await fetch(`http://127.0.0.1:${port}/api/key`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ key: secret }),
+    });
+    const body = await saved.json();
+    assert.equal(saved.status, 200, JSON.stringify(body));
+    assert.equal(body.hasOpenRouterKey, true);
+    assert.ok(!JSON.stringify(body).includes(secret));
+    const secretsFile = join(home, "secrets.json");
+    assert.ok(existsSync(secretsFile));
+    assert.match(readFileSync(secretsFile, "utf8"), /OPENROUTER_API_KEY/);
+  } finally {
+    child.kill();
+  }
 });

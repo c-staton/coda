@@ -142,7 +142,7 @@ export function playbackStatus() {
 function playFile(path, { wait = false } = {}) {
   stopCurrent();
   // If the menu app is installed, it is the only player. Falling through to
-  // afplay here was starting a second copy of the same clip — especially on
+  // afplay here was starting a second copy of the same clip, especially on
   // the first play, before AVAudioPlayer had written playback.json.
   if (!wait && useCodaBarPlayer()) {
     const ok = codaCtl("play", path);

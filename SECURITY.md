@@ -2,7 +2,7 @@
 
 ## API keys
 
-Coda stores keys in `~/.coda/secrets.json` with mode `600`. You can also set `OPENROUTER_API_KEY`, `XAI_API_KEY`, or `OPENAI_API_KEY` in your environment.
+Coda stores keys in `~/.coda/secrets.json` with mode `600`. Paste an OpenRouter key in the Coda window, or set `OPENROUTER_API_KEY`, `XAI_API_KEY`, or `OPENAI_API_KEY` in your environment. The settings page never shows the key back.
 
 Never commit those files. Never put a key in an issue, pull request, or screenshot.
 
